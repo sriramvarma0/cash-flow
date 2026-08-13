@@ -1,0 +1,23 @@
+{
+  "name": "cashflow",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:backend": "npm run start:dev --workspace backend",
+    "build": "npm run build --workspace frontend && npm run build --workspace backend",
+    "start": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"npm:start:backend\" \"npm:start:frontend\"",
+    "start:frontend": "npm run start --workspace frontend",
+    "start:backend": "npm run start:prod --workspace backend",
+    "lint": "npm run lint --workspace frontend && npm run lint --workspace backend",
+    "format": "npm run format --workspace frontend && npm run format --workspace backend"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  }
+}

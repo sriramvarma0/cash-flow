@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String       @id @default(cuid())
+  name              String
+  email             String       @unique
+  phoneNumber       String       @unique
+  passwordHash      String
+  createdAt         DateTime     @default(now())
+  expenses          Expense[]    @relation("ExpenseOwner")
+  receivedTransfers Expense[]    @relation("TransferRecipient")
+  ownedGroups       Group[]      @relation("GroupOwner")
+  memberGroups      Group[]      @relation("GroupMembers")
+  tags              Tag[]
+}
+
+model Expense {
+  id              String   @id @default(cuid())
+  amount          Float
+  category        String?
+  description     String?
+  paymentMethod   String   @default("Card")
+  date            DateTime
+  createdAt       DateTime @default(now())
+  userId          String
+  user            User     @relation("ExpenseOwner", fields: [userId], references: [id], onDelete: Cascade)
+  transactionType String   @default("EXPENSE") // EXPENSE, INCOME, TRANSFER
+  toUserId        String?
+  toUser          User?    @relation("TransferRecipient", fields: [toUserId], references: [id], onDelete: SetNull)
+  tags            Tag[]
+  categoryType    String?
+
+  @@index([userId, date])
+  @@index([userId, category])
+  @@index([userId, categoryType])
+}
+
+model Group {
+  id          String       @id @default(cuid())
+  name        String
+  createdAt   DateTime     @default(now())
+  ownerId     String
+  owner       User         @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     User[]       @relation("GroupMembers")
+  invitations Invitation[]
+}
+
+model Invitation {
+  id           String   @id @default(cuid())
+  groupId      String
+  group        Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviteeEmail String?
+  inviteePhone String?
+  status       String   @default("PENDING") // PENDING, ACCEPTED, DECLINED
+  createdAt    DateTime @default(now())
+
+  @@index([inviteeEmail])
+  @@index([inviteePhone])
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  name      String
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses  Expense[]
+
+  @@unique([name, userId])
+}
+

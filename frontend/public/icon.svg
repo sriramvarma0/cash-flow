@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="CashFlow">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#17a66b"/>
+      <stop offset="100%" stop-color="#0d533c"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#g)"/>
+  <path d="M72 84h112a12 12 0 0 1 12 12v64a12 12 0 0 1-12 12H72a12 12 0 0 1-12-12V96a12 12 0 0 1 12-12Zm20 20v56h72v-56H92Zm108 6a10 10 0 0 0 0 20 10 10 0 0 0 0-20Zm0 28a10 10 0 0 0 0 20 10 10 0 0 0 0-20Z" fill="#f6fff9"/>
+</svg>
