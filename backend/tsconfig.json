@@ -15,7 +15,8 @@
     "types": ["node"],
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "strictPropertyInitialization": false
+    "strictPropertyInitialization": false,
+    "noImplicitAny": false
   },
   "include": ["src/**/*.ts", "prisma/**/*.ts"],
   "exclude": ["node_modules", "dist", "test"]

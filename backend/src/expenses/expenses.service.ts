@@ -199,7 +199,7 @@ export class ExpensesService {
       throw new NotFoundException('Expense not found');
     }
 
-    let tagsUpdate = undefined;
+    let tagsUpdate: any = undefined;
     if (dto.tags !== undefined) {
       const uniqueTags = Array.from(new Set(dto.tags.map((t) => t.trim()).filter(Boolean)));
       tagsUpdate = {
