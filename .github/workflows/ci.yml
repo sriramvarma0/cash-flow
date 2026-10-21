@@ -39,6 +39,9 @@ jobs:
       - name: Lint Workspace (Frontend & Backend)
         run: npm run lint
 
+      - name: Type Check (TypeScript)
+        run: npm run typecheck
+
       - name: Validate Prisma Schema
         run: npx prisma validate --schema=backend/prisma/schema.prisma
 

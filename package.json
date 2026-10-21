@@ -15,6 +15,7 @@
     "start:frontend": "npm run start --workspace frontend",
     "start:backend": "npm run start:prod --workspace backend",
     "lint": "npm run lint --workspace frontend && npm run lint --workspace backend",
+    "typecheck": "tsc --noEmit -p frontend/tsconfig.json && tsc --noEmit -p backend/tsconfig.json",
     "format": "npm run format --workspace frontend && npm run format --workspace backend"
   },
   "devDependencies": {
