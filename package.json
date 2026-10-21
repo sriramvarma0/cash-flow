@@ -20,7 +20,11 @@
     "format": "npm run format --workspace frontend && npm run format --workspace backend",
     "db:test": "node scripts/test-db.js",
     "d1:migrate": "node scripts/d1-migrate.js",
-    "d1:migrate:dry": "node scripts/d1-migrate.js --dry-run"
+    "d1:migrate:dry": "node scripts/d1-migrate.js --dry-run",
+    "d1:migrate:datetime": "node scripts/d1-migrate-datetime.js",
+    "d1:migrate:datetime:dry": "node scripts/d1-migrate-datetime.js --dry-run",
+    "d1:migrate:datetime:rollback": "node scripts/d1-migrate-datetime.js --rollback",
+    "test:datetime": "node scripts/test-datetime-conversion.js"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",

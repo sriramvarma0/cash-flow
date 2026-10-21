@@ -65,6 +65,44 @@ function serializeParam(param: any): any {
   return param;
 }
 
+const DATETIME_COLUMN_NAMES = new Set([
+  'createdat',
+  'updatedat',
+  'lockoutuntil',
+  'date',
+  'started_at',
+  'finished_at',
+  'rolled_back_at'
+]);
+
+function isDateTimeColumn(colName: string): boolean {
+  if (!colName) return false;
+  return DATETIME_COLUMN_NAMES.has(colName.toLowerCase());
+}
+
+/**
+ * Normalizes values returned from Cloudflare D1.
+ * D1 REST API returns columns as dynamically-typed JavaScript values.
+ * If a DateTime field is stored as a Unix epoch timestamp in milliseconds (number),
+ * @prisma/adapter-d1's inferColumnType() infers ColumnTypeEnum.Double because
+ * typeof value === 'number'. This causes Prisma Query Engine to reject the row with:
+ * "Inconsistent column data: Could not convert value ... to type DateTime".
+ * Normalizing millisecond timestamp numbers to ISO-8601 strings enables
+ * @prisma/adapter-d1 to correctly infer ColumnTypeEnum.DateTime.
+ */
+function normalizeD1Value(val: any, colName: string): any {
+  if (val === null || val === undefined) return val;
+  if (
+    isDateTimeColumn(colName) &&
+    typeof val === 'number' &&
+    Number.isFinite(val) &&
+    val > 100000000000
+  ) {
+    return new Date(val).toISOString();
+  }
+  return val;
+}
+
 export function createD1HttpClient(config: D1HttpConfig): D1Database {
   const { accountId, databaseId, apiToken, httpUrl } = config;
 
@@ -149,8 +187,17 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
 
       async all<T = any>() {
         const res = await executeSql(query, boundParams);
+        const rows = (res.results as any[]) || [];
+        const normalized = rows.map((row) => {
+          if (!row || typeof row !== 'object') return row;
+          const clone: any = { ...row };
+          for (const k of Object.keys(clone)) {
+            clone[k] = normalizeD1Value(clone[k], k);
+          }
+          return clone;
+        });
         return {
-          results: (res.results as T[]) || [],
+          results: normalized as T[],
           success: res.success,
           meta: res.meta
         };
@@ -160,8 +207,12 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
         const res = await executeSql(query, boundParams);
         const firstRow = res.results?.[0];
         if (!firstRow) return null;
-        if (colName) return firstRow[colName] ?? null;
-        return firstRow as T;
+        if (colName) return normalizeD1Value(firstRow[colName] ?? null, colName);
+        const clone: any = { ...firstRow };
+        for (const k of Object.keys(clone)) {
+          clone[k] = normalizeD1Value(clone[k], k);
+        }
+        return clone as T;
       },
 
       async raw(options?: { columnNames?: boolean }) {
@@ -174,7 +225,9 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
         }
 
         const columnNames = Object.keys(rows[0]);
-        const rowArrays = rows.map((r) => columnNames.map((col) => r[col]));
+        const rowArrays = rows.map((r) =>
+          columnNames.map((col) => normalizeD1Value(r[col], col))
+        );
 
         if (options?.columnNames) {
           return [columnNames, ...rowArrays];

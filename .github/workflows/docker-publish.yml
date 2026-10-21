@@ -51,6 +51,12 @@ jobs:
       - name: Type Check (TypeScript)
         run: npm run typecheck
 
+      - name: Validate DateTime Conversion & Adapter Layer
+        run: npm run test:datetime
+
+      - name: Verify Database Connectivity & Conversion
+        run: npm run db:test
+
       - name: Build Verification (Frontend & Backend)
         run: npm run build
 

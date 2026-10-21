@@ -56,6 +56,34 @@ async function testDatabase() {
       return data.result?.[0] || {};
     }
 
+    const DATETIME_COLUMN_NAMES = new Set([
+      'createdat',
+      'updatedat',
+      'lockoutuntil',
+      'date',
+      'started_at',
+      'finished_at',
+      'rolled_back_at'
+    ]);
+
+    function isDateTimeColumn(colName) {
+      if (!colName) return false;
+      return DATETIME_COLUMN_NAMES.has(colName.toLowerCase());
+    }
+
+    function normalizeD1Value(val, colName) {
+      if (val === null || val === undefined) return val;
+      if (
+        isDateTimeColumn(colName) &&
+        typeof val === 'number' &&
+        Number.isFinite(val) &&
+        val > 100000000000
+      ) {
+        return new Date(val).toISOString();
+      }
+      return val;
+    }
+
     const d1Mock = {
       prepare(query) {
         let bound = [];
@@ -69,19 +97,34 @@ async function testDatabase() {
           },
           async all() {
             const res = await executeSql(query, bound);
-            return { results: res.results || [], success: true, meta: res.meta };
+            const rows = res.results || [];
+            const normalized = rows.map((row) => {
+              if (!row || typeof row !== 'object') return row;
+              const clone = { ...row };
+              for (const k of Object.keys(clone)) {
+                clone[k] = normalizeD1Value(clone[k], k);
+              }
+              return clone;
+            });
+            return { results: normalized, success: true, meta: res.meta };
           },
           async first(col) {
             const res = await executeSql(query, bound);
             const first = res.results?.[0];
-            return col ? first?.[col] : first;
+            if (!first) return null;
+            if (col) return normalizeD1Value(first[col] ?? null, col);
+            const clone = { ...first };
+            for (const k of Object.keys(clone)) {
+              clone[k] = normalizeD1Value(clone[k], k);
+            }
+            return clone;
           },
           async raw(options) {
             const res = await executeSql(query, bound);
             const rows = res.results || [];
             if (rows.length === 0) return options?.columnNames ? [[]] : [];
             const cols = Object.keys(rows[0]);
-            const arr = rows.map((r) => cols.map((c) => r[c]));
+            const arr = rows.map((r) => cols.map((c) => normalizeD1Value(r[c], c)));
             return options?.columnNames ? [cols, ...arr] : arr;
           }
         };
@@ -122,8 +165,23 @@ async function testDatabase() {
     const userCount = await prisma.user.count();
     console.log(`   Total registered users: ${userCount}`);
 
+    console.log('3. Validating DateTime field conversion (findFirst User & Expense)...');
+    const sampleUser = await prisma.user.findFirst();
+    if (sampleUser) {
+      const isDate = sampleUser.createdAt instanceof Date;
+      console.log(`   User.createdAt: ${sampleUser.createdAt?.toISOString?.() ?? sampleUser.createdAt} (instanceof Date: ${isDate})`);
+      if (!isDate) throw new Error('User.createdAt is not an instance of Date!');
+    }
+
+    const sampleExpense = await prisma.expense.findFirst();
+    if (sampleExpense) {
+      const isDate = sampleExpense.date instanceof Date;
+      console.log(`   Expense.date: ${sampleExpense.date?.toISOString?.() ?? sampleExpense.date} (instanceof Date: ${isDate})`);
+      if (!isDate) throw new Error('Expense.date is not an instance of Date!');
+    }
+
     console.log('====================================================');
-    console.log(`✅ SUCCESS: ${provider.toUpperCase()} database connection verified!`);
+    console.log(`✅ SUCCESS: ${provider.toUpperCase()} database connection and DateTime conversion verified!`);
     console.log('====================================================');
   } catch (err) {
     console.error(`❌ Database verification failed for provider [${provider}]:`, err.message);

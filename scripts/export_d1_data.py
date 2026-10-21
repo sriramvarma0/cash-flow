@@ -34,11 +34,20 @@ def compute_sha256(filepath):
             h.update(chunk)
     return h.hexdigest()
 
-def format_sql_value(val, col_type=""):
+def format_sql_value(val, col_name="", col_type=""):
     if val is None:
         return "NULL"
     if isinstance(val, bool):
         return "1" if val else "0"
+    # Format DateTime integer millisecond timestamps as ISO-8601 strings for Cloudflare D1 / @prisma/adapter-d1
+    is_date_col = (
+        col_type.upper() == "DATETIME" or
+        col_name.lower() in ("createdat", "updatedat", "lockoutuntil", "date", "started_at", "finished_at", "rolled_back_at")
+    )
+    if is_date_col and isinstance(val, (int, float)) and val > 100000000000:
+        dt = datetime.fromtimestamp(val / 1000.0, tz=timezone.utc)
+        iso_str = dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        return f"'{iso_str}'"
     if isinstance(val, (int, float)):
         return str(val)
     if isinstance(val, bytes):
@@ -145,7 +154,7 @@ def export_data():
                 formatted_values = []
                 for val, col_name in zip(row, col_names):
                     col_t = col_types.get(col_name, "")
-                    formatted_values.append(format_sql_value(val, col_t))
+                    formatted_values.append(format_sql_value(val, col_name, col_t))
                 val_str = ", ".join(formatted_values)
                 lines.append(f'INSERT INTO "{tbl}" ({quoted_cols}) VALUES ({val_str});')
             lines.append("")
