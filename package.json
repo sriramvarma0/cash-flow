@@ -12,11 +12,15 @@
     "dev:backend": "npm run start:dev --workspace backend",
     "build": "npm run build --workspace frontend && npm run build --workspace backend",
     "start": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"npm:start:backend\" \"npm:start:frontend\"",
+    "start:container": "node scripts/start-container.js",
     "start:frontend": "npm run start --workspace frontend",
     "start:backend": "npm run start:prod --workspace backend",
     "lint": "npm run lint --workspace frontend && npm run lint --workspace backend",
     "typecheck": "tsc --noEmit -p frontend/tsconfig.json && tsc --noEmit -p backend/tsconfig.json",
-    "format": "npm run format --workspace frontend && npm run format --workspace backend"
+    "format": "npm run format --workspace frontend && npm run format --workspace backend",
+    "db:test": "node scripts/test-db.js",
+    "d1:migrate": "node scripts/d1-migrate.js",
+    "d1:migrate:dry": "node scripts/d1-migrate.js --dry-run"
   },
   "devDependencies": {
     "concurrently": "^10.0.3"

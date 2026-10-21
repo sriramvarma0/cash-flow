@@ -1,7 +1,13 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
-export const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+const rawBackendUrl =
+  process.env.INTERNAL_BACKEND_URL ||
+  process.env.BACKEND_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  `http://127.0.0.1:${process.env.BACKEND_PORT || '4000'}`;
+
+export const backendUrl = rawBackendUrl.replace(/\/$/, '');
 
 export async function getAuthToken() {
   const cookieStore = await cookies();

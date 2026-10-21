@@ -1,65 +1,38 @@
 version: '3.8'
 
 services:
-  backend:
-    image: ${DOCKERHUB_USERNAME:-sriramvarma0}/cashflow-backend:${IMAGE_TAG:-latest}
+  cashflow:
+    image: ${DOCKERHUB_USERNAME:-sriramvarma0}/cashflow:${IMAGE_TAG:-latest}
     build:
       context: .
-      dockerfile: backend/Dockerfile
-    container_name: cashflow-backend
-    restart: unless-stopped
-    ports:
-      - "4000:4000"
-    environment:
-      - PORT=4000
-      - NODE_ENV=production
-      - DATABASE_URL=file:/app/data/cashflow.db
-      - JWT_SECRET=${JWT_SECRET:-change-this-jwt-secret-in-production-env}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
-      - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
-    volumes:
-      - cashflow_data:/app/data
-    networks:
-      - cashflow-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  frontend:
-    image: ${DOCKERHUB_USERNAME:-sriramvarma0}/cashflow-frontend:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-      args:
-        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
-    container_name: cashflow-frontend
+      dockerfile: Dockerfile
+    container_name: cashflow
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
+      - BACKEND_PORT=4000
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - cashflow-network
+      # Database Provider: 'd1' for Cloudflare D1 (production), 'sqlite' for local development
+      - DATABASE_PROVIDER=${DATABASE_PROVIDER:-d1}
+      # Cloudflare D1 Production Configuration (Required when DATABASE_PROVIDER=d1)
+      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
+      - CLOUDFLARE_D1_DATABASE_ID=${CLOUDFLARE_D1_DATABASE_ID:-}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - CLOUDFLARE_D1_HTTP_URL=${CLOUDFLARE_D1_HTTP_URL:-}
+      # SQLite Configuration (Used only when DATABASE_PROVIDER=sqlite)
+      - DATABASE_URL=${DATABASE_URL:-file:/app/data/cashflow.db}
+      # Authentication & Security
+      - JWT_SECRET=${JWT_SECRET:-change-this-jwt-secret-in-production-env}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
+      - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - INTERNAL_BACKEND_URL=http://127.0.0.1:4000
+      - AUTO_MIGRATE=${AUTO_MIGRATE:-true}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 15s
-
-volumes:
-  cashflow_data:
-    driver: local
-
-networks:
-  cashflow-network:
-    driver: bridge
+      start_period: 20s

@@ -1,7 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-
-const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+import { backendUrl } from '@/lib/backend';
 
 export async function POST(request: Request) {
   const body = await request.json();

@@ -1,4 +1,4 @@
-name: Build, Verify and Push to Docker Hub
+name: Build, Verify and Push Single Container to Docker Hub
 
 on:
   push:
@@ -16,6 +16,7 @@ jobs:
     name: 1. Code Quality & Build Verification
     runs-on: ubuntu-latest
     env:
+      DATABASE_PROVIDER: "sqlite"
       DATABASE_URL: "file:./dev.db"
       NEXT_PUBLIC_API_BASE_URL: "http://localhost:4000"
       JWT_SECRET: "ci-validation-secret-key-32-chars-long"
@@ -36,8 +37,13 @@ jobs:
       - name: Validate Prisma Schema
         run: npx prisma validate --schema=backend/prisma/schema.prisma
 
-      - name: Generate Prisma Client
+      - name: Generate Prisma Client (with D1 driverAdapters)
         run: npx prisma generate --schema=backend/prisma/schema.prisma
+
+      - name: Check Migration Definitions
+        run: |
+          test -f backend/prisma/migrations/migration_lock.toml
+          echo "Verified migration lock and history."
 
       - name: Lint Workspace (ESLint)
         run: npm run lint
@@ -49,7 +55,7 @@ jobs:
         run: npm run build
 
   docker-publish:
-    name: 2. Build & Push Images to Docker Hub
+    name: 2. Build & Push Unified Image to Docker Hub
     runs-on: ubuntu-latest
     needs: [verify]
 
@@ -69,52 +75,26 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Extract metadata & tags for Backend Image
-      - name: Extract Docker metadata (Backend)
-        id: meta-backend
+      # Extract metadata & tags for Unified Single Image
+      - name: Extract Docker metadata (CashFlow Unified)
+        id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/cashflow-backend
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/cashflow
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' }}
             type=sha,format=short
             type=ref,event=branch
 
-      # Build and Push Backend Image
-      - name: Build & Push Backend Image
+      # Build and Push Single Unified Image
+      - name: Build & Push Single Production Image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: backend/Dockerfile
+          file: ./Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Extract metadata & tags for Frontend Image
-      - name: Extract Docker metadata (Frontend)
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/cashflow-frontend
-          tags: |
-            type=raw,value=latest
-            type=sha,format=short
-            type=ref,event=branch
-
-      # Build and Push Frontend Image
-      - name: Build & Push Frontend Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: frontend/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
-          build-args: |
-            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

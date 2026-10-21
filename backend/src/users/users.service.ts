@@ -38,7 +38,8 @@ export class UsersService implements OnModuleInit {
           }
 
           await this.prisma.$transaction(async (tx) => {
-            await tx.$executeRawUnsafe('PRAGMA foreign_keys = OFF;');
+            try { await tx.$executeRawUnsafe('PRAGMA defer_foreign_keys = ON;'); } catch {}
+            try { await tx.$executeRawUnsafe('PRAGMA foreign_keys = OFF;'); } catch {}
             await tx.$executeRawUnsafe('UPDATE "User" SET id = ? WHERE id = ?;', newId, oldId);
             await tx.$executeRawUnsafe('UPDATE "Expense" SET userId = ? WHERE userId = ?;', newId, oldId);
             await tx.$executeRawUnsafe('UPDATE "Expense" SET toUserId = ? WHERE toUserId = ?;', newId, oldId);
@@ -48,7 +49,8 @@ export class UsersService implements OnModuleInit {
             } catch {}
             await tx.$executeRawUnsafe('UPDATE "Tag" SET userId = ? WHERE userId = ?;', newId, oldId);
             await tx.$executeRawUnsafe('UPDATE "Investment" SET userId = ? WHERE userId = ?;', newId, oldId);
-            await tx.$executeRawUnsafe('PRAGMA foreign_keys = ON;');
+            try { await tx.$executeRawUnsafe('PRAGMA foreign_keys = ON;'); } catch {}
+            try { await tx.$executeRawUnsafe('PRAGMA defer_foreign_keys = OFF;'); } catch {}
           });
           console.log(`[UsersService] Migrated user "${user.name}" (${user.email}): ${oldId} -> ${newId} (10 digits)`);
         }
