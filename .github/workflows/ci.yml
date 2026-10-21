@@ -18,6 +18,10 @@ jobs:
   validate-and-build:
     name: Lint, Schema & Build Validation
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: "file:./dev.db"
+      NEXT_PUBLIC_API_BASE_URL: "http://localhost:4000"
+      JWT_SECRET: "ci-validation-secret-key-32-chars-long"
 
     steps:
       - name: Checkout Code
@@ -38,10 +42,11 @@ jobs:
       - name: Validate Prisma Schema
         run: npx prisma validate --schema=backend/prisma/schema.prisma
 
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema=backend/prisma/schema.prisma
+
       - name: Build Application (Frontend & Backend)
         run: npm run build
-        env:
-          NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
 
   docker-build-check:
     name: Docker Images Build Verification
