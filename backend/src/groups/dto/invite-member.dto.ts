@@ -1,6 +1,10 @@
 import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class InviteMemberDto {
+  @IsString()
+  @IsOptional()
+  userId?: string;
+
   @IsEmail()
   @IsOptional()
   email?: string;

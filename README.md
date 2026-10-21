@@ -34,9 +34,6 @@ npm run prisma:generate --workspace backend
 npm run prisma:migrate --workspace backend
 ```
 
-This creates a local `dev.db` SQLite database in the backend folder. The schema is structured so it can later be migrated to PostgreSQL with Prisma when you're ready.
-The migration script creates a simple backup copy at `backend/prisma/dev.db.bak` before applying schema changes.
-
 5. Start the apps in separate terminals:
 
 ```bash
@@ -44,9 +41,12 @@ npm run dev:backend
 npm run dev:frontend
 ```
 
+---
+
 ## MVP Features
 
-- JWT authentication with register and login flows
-- Expense CRUD with filters
-- Dashboard cards, tables, and charts
-- Clean separation between API, services, DTOs, and Prisma data access
+- JWT authentication with multi-session support
+- Expense CRUD with dynamic tag and category management
+- Shared expense groups & member invitations
+- Interactive investment portfolio tracking & Yahoo Finance live quotes
+- PWA & mobile-responsive design

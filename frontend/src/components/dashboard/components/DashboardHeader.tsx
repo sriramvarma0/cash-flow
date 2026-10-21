@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { DashboardConfig } from '../dashboard-view';
 import { Expense } from '../../../lib/types';
-import { formatCurrency } from '../../../lib/finance';
+import { formatCurrency, DateFilterType } from '../../../lib/finance';
 
 export type DashboardHeaderProps = {
   pathname: string;
@@ -26,6 +26,14 @@ export type DashboardHeaderProps = {
   handleCreateDashboard: (e: React.FormEvent) => void;
   loadGroupExpenses: (id: string) => Promise<void>;
   loadExpenses: () => Promise<void>;
+  timeFilter: DateFilterType;
+  setTimeFilter: (filter: DateFilterType) => void;
+  customStartDate: string;
+  setCustomStartDate: (date: string) => void;
+  customEndDate: string;
+  setCustomEndDate: (date: string) => void;
+  dateRangeLabel: string;
+  filteredCount?: number;
 };
 
 export function DashboardHeader({
@@ -50,18 +58,69 @@ export function DashboardHeader({
   allTags,
   handleCreateDashboard,
   loadGroupExpenses,
-  loadExpenses
+  loadExpenses,
+  timeFilter,
+  setTimeFilter,
+  customStartDate,
+  setCustomStartDate,
+  customEndDate,
+  setCustomEndDate,
+  dateRangeLabel,
+  filteredCount
 }: DashboardHeaderProps) {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const renderDashboardSelector = () => {
     return (
       <div className="space-y-8 animate-in fade-in duration-300">
-        <div>
-          <h2 className="text-3xl font-semibold tracking-tight text-ink-900 text-left">
-            Your Dashboards
-          </h2>
-          <p className="text-sm text-ink-500 text-left mt-1">
-            Select a dashboard to view rich metrics, charts, and transaction activity.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h2 className="text-3xl font-semibold tracking-tight text-ink-900 text-left">
+              Your Dashboards
+            </h2>
+            <p className="text-sm text-ink-500 text-left mt-1">
+              Select a dashboard to view rich metrics, charts, and transaction activity.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-white/95 border border-ink-200/80 rounded-xl px-2.5 py-1.5 shadow-2xs hover:border-brand-300 transition">
+              <span className="text-brand-600">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </span>
+              <select
+                value={timeFilter}
+                onChange={(e) => setTimeFilter(e.target.value as DateFilterType)}
+                className="bg-transparent text-xs font-semibold text-ink-800 focus:outline-hidden cursor-pointer"
+                title="Filter by time period"
+              >
+                <option value="current_month">Current Month</option>
+                <option value="calendar_year">Current Calendar Year</option>
+                <option value="financial_year">Current Financial Year</option>
+                <option value="custom">Custom Range...</option>
+                <option value="all">All Time</option>
+              </select>
+            </div>
+            {timeFilter === 'custom' && (
+              <div className="flex items-center gap-1.5 bg-white/95 border border-brand-200 rounded-xl px-2.5 py-1 text-xs shadow-2xs animate-in fade-in duration-200">
+                <span className="text-ink-400 text-[11px] font-medium">From</span>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="text-xs font-semibold text-ink-800 bg-ink-50/80 border border-ink-200 rounded-lg px-2 py-0.5 focus:outline-hidden focus:ring-1 focus:ring-brand-500"
+                />
+                <span className="text-ink-400 text-[11px] font-medium">To</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="text-xs font-semibold text-ink-800 bg-ink-50/80 border border-ink-200 rounded-lg px-2 py-0.5 focus:outline-hidden focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -127,9 +186,14 @@ export function DashboardHeader({
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-ink-900 group-hover:text-blue-700 transition">
-                    {g.name}
-                  </h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg font-bold text-ink-900 group-hover:text-blue-700 transition">
+                      {g.name}
+                    </h3>
+                    <span className="inline-block bg-blue-50 border border-blue-200 px-2 py-0.5 rounded text-[11px] font-mono font-bold text-blue-800">
+                      ID: {g.id}
+                    </span>
+                  </div>
                   <p className="text-xs text-ink-500 mt-1">
                     Shared group expenses between {g.members.length} members.
                   </p>
@@ -414,19 +478,80 @@ export function DashboardHeader({
             )}
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-2.5">
+            {/* Time Period Filter Dropdown */}
+            <div className="flex items-center gap-1.5 bg-white/95 border border-ink-200/80 rounded-xl px-2.5 py-1.5 shadow-2xs hover:border-brand-300 transition">
+              <span className="text-brand-600">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </span>
+              <select
+                value={timeFilter}
+                onChange={(e) => setTimeFilter(e.target.value as DateFilterType)}
+                className="bg-transparent text-xs font-semibold text-ink-800 focus:outline-hidden cursor-pointer"
+                title="Filter by time period"
+              >
+                <option value="current_month">Current Month</option>
+                <option value="calendar_year">Current Calendar Year</option>
+                <option value="financial_year">Current Financial Year</option>
+                <option value="custom">Custom Range...</option>
+                <option value="all">All Time</option>
+              </select>
+            </div>
+
+            {/* Custom Date Range Inputs */}
+            {timeFilter === 'custom' && (
+              <div className="flex items-center gap-1.5 bg-white/95 border border-brand-200 rounded-xl px-2.5 py-1 text-xs shadow-2xs animate-in fade-in duration-200">
+                <span className="text-ink-400 text-[11px] font-medium">From</span>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="text-xs font-semibold text-ink-800 bg-ink-50/80 border border-ink-200 rounded-lg px-2 py-0.5 focus:outline-hidden focus:ring-1 focus:ring-brand-500"
+                />
+                <span className="text-ink-400 text-[11px] font-medium">To</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="text-xs font-semibold text-ink-800 bg-ink-50/80 border border-ink-200 rounded-lg px-2 py-0.5 focus:outline-hidden focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+            )}
+
+            {/* Refresh Button */}
             <button
-              className="cash-button-secondary py-2 text-xs"
+              className="cash-button-secondary py-2 px-3.5 text-xs flex items-center gap-1.5 font-semibold text-ink-700 hover:text-ink-900 border-ink-200 hover:border-ink-300 shadow-2xs transition"
               type="button"
-              onClick={() => {
-                if (selectedDashboard.type === 'group') {
-                  void loadGroupExpenses(selectedDashboard.id);
-                } else {
-                  void loadExpenses();
+              disabled={isRefreshing}
+              onClick={async () => {
+                setIsRefreshing(true);
+                try {
+                  if (selectedDashboard.type === 'group') {
+                    await loadGroupExpenses(selectedDashboard.id);
+                  } else {
+                    await loadExpenses();
+                  }
+                } finally {
+                  setTimeout(() => setIsRefreshing(false), 500);
                 }
               }}
             >
-              Refresh
+              <svg
+                className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin text-brand-600' : 'text-ink-500'}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              <span>Refresh</span>
             </button>
           </div>
         </div>

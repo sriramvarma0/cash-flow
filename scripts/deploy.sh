@@ -2,7 +2,7 @@
 set -e
 
 APP_DIR=${CASHFLOW_APP_DIR:-"/opt/cashflow"}
-HEALTH_CHECK_URL="http://localhost:4000/api/users/me"
+HEALTH_CHECK_URL="http://localhost:4000/health"
 
 echo "=== CashFlow Production Deployment ==="
 
@@ -14,7 +14,8 @@ cd "$ROOT_DIR"
 
 # 1. Pull code
 echo "1. Pulling latest code..."
-git pull origin main
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "master")
+git pull origin "$CURRENT_BRANCH"
 
 # 2. Install dependencies
 echo "2. Installing application dependencies..."

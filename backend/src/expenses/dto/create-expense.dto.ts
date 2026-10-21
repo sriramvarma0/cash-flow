@@ -22,7 +22,7 @@ export class CreateExpenseDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['EXPENSE', 'INCOME', 'TRANSFER'])
+  @IsIn(['EXPENSE', 'INCOME', 'TRANSFER', 'INVESTMENT', 'INVESTMENT_BUY', 'INVESTMENT_SELL', 'BUY', 'SELL'])
   transactionType?: string;
 
   @IsOptional()

@@ -19,15 +19,17 @@ export async function POST(request: Request) {
     return NextResponse.json(payload, { status: response.status });
   }
 
-  const isSecure = request.url.startsWith('https://') || request.headers.get('x-forwarded-proto') === 'https';
-  const cookieStore = await cookies();
-  cookieStore.set('cashflow_token', payload.accessToken, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isSecure,
-    path: '/',
-    maxAge: 60 * 60 * 24 * 7
-  });
+  if (payload.accessToken) {
+    const isSecure = request.url.startsWith('https://') || request.headers.get('x-forwarded-proto') === 'https';
+    const cookieStore = await cookies();
+    cookieStore.set('cashflow_token', payload.accessToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isSecure,
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7
+    });
+  }
 
   return NextResponse.json(payload);
 }

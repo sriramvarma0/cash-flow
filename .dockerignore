@@ -1,0 +1,43 @@
+# Git & VCS
+.git
+.gitignore
+.github
+
+# Node & dependencies
+node_modules
+*/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build artifacts
+.next
+*/.next
+dist
+*/dist
+.turbo
+*.tsbuildinfo
+
+# Environment and sensitive files
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# SQLite database files and active writes
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+backend/prisma/*.db
+data/*.db
+data/backups
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+.gemini

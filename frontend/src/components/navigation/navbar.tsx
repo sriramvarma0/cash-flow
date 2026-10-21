@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { logout, fetchCurrentUser, getSavedAccounts, removeSavedAccount, clearAllSavedAccounts, switchAccount, SavedAccount, fetchPendingInvitations, respondToInvitation, GroupInvitation } from '../../lib/api';
 import { AuthUser } from '../../lib/types';
+import { UniversalSearch } from './universal-search';
 
 // Hamburger Menu Icon
 function MenuIcon({ className }: { className?: string }) {
@@ -91,6 +92,9 @@ const mockNotifications: NotificationItem[] = [
 
 export function Navbar({ onMenuClick }: NavbarProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
@@ -225,6 +229,9 @@ export function Navbar({ onMenuClick }: NavbarProps) {
             </div>
           </Link>
         </div>
+
+        {/* Center: Universal Search Bar */}
+        <UniversalSearch />
 
         {/* Right Side: Account switcher dropdown */}
         <div className="flex items-center gap-4">
@@ -367,6 +374,23 @@ export function Navbar({ onMenuClick }: NavbarProps) {
                       {user.phoneNumber && (
                         <p className="text-xxs text-ink-400 mt-0.5">{user.phoneNumber}</p>
                       )}
+                      {/* User ID Badge */}
+                      <div className="mt-2.5 flex items-center justify-center gap-1.5 bg-ink-50 px-3 py-1 rounded-xl border border-ink-150 text-xs">
+                        <span className="text-[10px] uppercase font-bold text-ink-400">User ID:</span>
+                        <span className="font-mono font-bold text-ink-900 tracking-wider">{user.id}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(user.id);
+                            alert(`User ID ${user.id} copied to clipboard!`);
+                          }}
+                          title="Copy User ID to clipboard"
+                          className="ml-1 text-ink-400 hover:text-brand-700 hover:scale-110 transition text-xs"
+                        >
+                          📋
+                        </button>
+                      </div>
                     </div>
 
                     {/* Other Accounts List */}

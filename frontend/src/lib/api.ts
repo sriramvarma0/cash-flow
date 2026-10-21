@@ -1,4 +1,4 @@
-import { AuthUser, Expense } from './types';
+import { AuthUser, Expense, Investment, InvestmentTransaction } from './types';
 
 type AuthPayload = {
   name: string;
@@ -63,14 +63,92 @@ async function parseJson<T>(response: Response): Promise<T> {
   }
 }
 
+export interface LoginResponse {
+  user?: AuthUser;
+  accessToken?: string;
+  requires2FA?: boolean;
+  tempToken?: string;
+  message?: string;
+}
+
+export interface TwoFactorSetupData {
+  secret: string;
+  otpauthUri: string;
+  qrCode: string;
+  qrCodeDataUrl?: string;
+  issuer: string;
+  accountName: string;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  remainingRecoveryCodes: number;
+}
+
 export async function login(payload: Omit<AuthPayload, 'name' | 'phoneNumber'>) {
-  return parseJson<{ user: AuthUser; accessToken: string }>(
+  return parseJson<LoginResponse>(
     await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
   );
+}
+
+export async function verify2faLogin(tempToken: string, code: string) {
+  return parseJson<{ user: AuthUser; accessToken: string; recoveryCodeUsed?: boolean; remainingRecoveryCodes?: number; message?: string }>(
+    await fetch('/api/auth/2fa/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tempToken, code })
+    })
+  );
+}
+
+export async function setup2fa() {
+  const response = await fetch('/api/auth/2fa/setup');
+  return parseJson<TwoFactorSetupData>(response);
+}
+
+export async function enable2fa(code: string) {
+  const response = await fetch('/api/auth/2fa/enable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+  return parseJson<{ success: boolean; message: string; recoveryCodes: string[] }>(response);
+}
+
+export async function disable2fa(payload: { password?: string; code?: string }) {
+  const response = await fetch('/api/auth/2fa/disable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return parseJson<{ success: boolean; message: string }>(response);
+}
+
+export async function get2faStatus() {
+  const response = await fetch('/api/auth/2fa/status');
+  return parseJson<TwoFactorStatus>(response);
+}
+
+export async function regenerateRecoveryCodes(password?: string) {
+  const response = await fetch('/api/auth/2fa/recovery-codes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password })
+  });
+  return parseJson<{ success: boolean; recoveryCodes: string[]; message: string }>(response);
+}
+
+export async function changePassword(payload: { currentPassword: string; newPassword: string }) {
+  const response = await fetch('/api/users/me/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return parseJson<{ success: boolean; message: string }>(response);
 }
 
 export async function register(payload: AuthPayload) {
@@ -107,7 +185,7 @@ export async function createExpense(payload: {
   description?: string;
   paymentMethod?: string;
   date: string;
-  transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER';
+  transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
   toUserId?: string;
   categoryType?: string;
   tags?: string[];
@@ -129,7 +207,7 @@ export async function updateExpense(
     description: string | null;
     paymentMethod: string;
     date: string;
-    transactionType: 'EXPENSE' | 'INCOME' | 'TRANSFER';
+    transactionType: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
     toUserId: string | null;
     categoryType: string | null;
     tags: string[];
@@ -157,7 +235,7 @@ export async function createExpensesBulk(payload: {
     description?: string;
     paymentMethod?: string;
     date: string;
-    transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER';
+    transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
     toUserId?: string;
     categoryType?: string;
     tags?: string[];
@@ -243,6 +321,9 @@ export interface GroupMember {
   name: string;
   email: string;
   phoneNumber: string;
+  role?: 'OWNER' | 'ADMIN' | 'MEMBER';
+  isOwner?: boolean;
+  isAdmin?: boolean;
 }
 
 export interface Group {
@@ -250,8 +331,32 @@ export interface Group {
   name: string;
   createdAt: string;
   ownerId: string;
-  owner: { id: string; name: string; email: string };
+  adminIds?: string;
+  owner: { id: string; name: string; email: string; phoneNumber?: string };
   members: GroupMember[];
+  invitations?: Array<{
+    id: string;
+    groupId: string;
+    inviteeEmail: string | null;
+    inviteePhone: string | null;
+    status: string;
+    createdAt: string;
+  }>;
+}
+
+export interface GroupDetail extends Group {
+  isMember: boolean;
+  isOwner: boolean;
+  isAdmin: boolean;
+  canAddMembers: boolean;
+  joinRequests: Array<{
+    id: string;
+    groupId: string;
+    inviteeEmail: string | null;
+    inviteePhone: string | null;
+    status: string;
+    createdAt: string;
+  }>;
 }
 
 export interface GroupInvitation {
@@ -275,6 +380,20 @@ export async function fetchGroups() {
   return parseJson<Group[]>(response);
 }
 
+export async function fetchGroupDetail(groupId: string) {
+  const response = await fetch(`/api/groups/${groupId}`);
+  return parseJson<GroupDetail>(response);
+}
+
+export async function toggleGroupAdmin(groupId: string, memberId: string) {
+  const response = await fetch(`/api/groups/${groupId}/toggle-admin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memberId })
+  });
+  return parseJson<{ success: boolean; isNowAdmin: boolean; message: string; adminIds: string }>(response);
+}
+
 export async function createGroup(name: string) {
   const response = await fetch('/api/groups', {
     method: 'POST',
@@ -284,7 +403,10 @@ export async function createGroup(name: string) {
   return parseJson<Group>(response);
 }
 
-export async function inviteToGroup(groupId: string, payload: { email?: string; phoneNumber?: string }) {
+export async function inviteToGroup(
+  groupId: string,
+  payload: { userId?: string; email?: string; phoneNumber?: string }
+) {
   const response = await fetch(`/api/groups/${groupId}/invite`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -316,4 +438,203 @@ export async function fetchAllUsers() {
   const response = await fetch('/api/users');
   return parseJson<AuthUser[]>(response);
 }
+
+export async function fetchInvestments() {
+  const response = await fetch('/api/investments');
+  return parseJson<Investment[]>(response);
+}
+
+export async function createInvestment(payload: {
+  code: string;
+  type: string;
+  units: number;
+  buyPrice: number;
+  date?: string;
+}) {
+  const response = await fetch('/api/investments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return parseJson<Investment>(response);
+}
+
+export async function fetchInvestmentTransactions(code?: string) {
+  const url = code
+    ? `/api/investments/${encodeURIComponent(code)}/transactions`
+    : '/api/investments/transactions';
+  const response = await fetch(url);
+  return parseJson<InvestmentTransaction[]>(response);
+}
+
+export async function recordInvestmentTransaction(
+  code: string,
+  payload: {
+    type: 'BUY' | 'SELL';
+    units: number;
+    price: number;
+    date?: string;
+  }
+) {
+  const response = await fetch(`/api/investments/${encodeURIComponent(code)}/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return parseJson<{ transaction: InvestmentTransaction; investment: Investment }>(response);
+}
+
+export async function updateInvestmentTransaction(
+  id: string,
+  payload: {
+    type?: 'BUY' | 'SELL';
+    units?: number;
+    price?: number;
+    date?: string;
+  }
+) {
+  const response = await fetch(`/api/investments/transactions/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return parseJson<{ transaction: InvestmentTransaction; investment: Investment }>(response);
+}
+
+export async function deleteInvestmentTransaction(id: string) {
+  const response = await fetch(`/api/investments/transactions/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  return parseJson<{ deleted: boolean; investment: Investment }>(response);
+}
+
+export async function deleteInvestmentAsset(code: string, password: string) {
+  const response = await fetch(`/api/investments/${encodeURIComponent(code)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password })
+  });
+  return parseJson<{ deleted: boolean; code: string; name: string }>(response);
+}
+
+
+export interface AccountExportPayload {
+  version: string;
+  exportId: string;
+  exportedAt: string;
+  appName: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    phoneNumber: string;
+    createdAt: string;
+  };
+  summary: {
+    totalTransactions: number;
+    totalInvestments: number;
+    totalInvestmentTransactions: number;
+    totalGroups: number;
+    totalTags: number;
+  };
+  data: {
+    transactions: any[];
+    investments: any[];
+    investmentTransactions: any[];
+    groups: any[];
+    tags: any[];
+    customPreferences?: {
+      categories?: string[];
+      tags?: string[];
+      dashboards?: any[];
+    };
+  };
+}
+
+export interface ImportedExternalGroup {
+  id: string;
+  name: string;
+  ownerId: string;
+  ownerName?: string;
+  memberCount: number;
+  isMember?: boolean;
+  canRequestJoin?: boolean;
+}
+
+export interface ImportResult {
+  success: boolean;
+  exportId: string;
+  exportedAt: string | null;
+  importedAt: string;
+  stats: {
+    transactions: { total: number; created: number; updated: number; skipped: number };
+    investments: { total: number; created: number; updated: number; skipped: number };
+    investmentTransactions: { total: number; created: number; updated: number; skipped: number };
+    groups: { total: number; created: number; updated: number; skipped: number };
+    tags: { total: number; created: number; updated: number; skipped: number };
+  };
+  externalGroups?: ImportedExternalGroup[];
+  message: string;
+}
+
+export interface GroupJoinRequest {
+  id: string;
+  groupId: string;
+  inviteeEmail: string | null;
+  inviteePhone: string | null;
+  status: string;
+  createdAt: string;
+  group: {
+    id: string;
+    name: string;
+    ownerId: string;
+    owner?: {
+      id: string;
+      name: string;
+      email: string;
+    };
+  };
+}
+
+export async function exportAccountData() {
+  const response = await fetch('/api/users/me/export');
+  return parseJson<AccountExportPayload>(response);
+}
+
+export async function importAccountData(payload: any) {
+  const response = await fetch('/api/users/me/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return parseJson<ImportResult>(response);
+}
+
+export async function requestToJoinGroup(groupId: string) {
+  const response = await fetch(`/api/groups/${encodeURIComponent(groupId)}/request-join`, {
+    method: 'POST'
+  });
+  return parseJson<{ success: boolean; status: string; message: string }>(response);
+}
+
+export async function fetchGroupJoinRequests() {
+  const response = await fetch('/api/groups/join-requests');
+  return parseJson<GroupJoinRequest[]>(response);
+}
+
+export async function respondToJoinRequest(requestId: string, accept: boolean) {
+  const response = await fetch(`/api/groups/join-requests/${encodeURIComponent(requestId)}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accept })
+  });
+  return parseJson<{ success: boolean; status: string; message: string }>(response);
+}
+
+export async function fetchMySentJoinRequests() {
+  const response = await fetch('/api/groups/my-requests');
+  return parseJson<GroupJoinRequest[]>(response);
+}
+
+
 

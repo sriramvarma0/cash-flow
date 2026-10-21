@@ -3,7 +3,17 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useEffect, useState } from 'react';
-import { login, register, saveAccount, getSavedAccounts, removeSavedAccount, clearAllSavedAccounts, switchAccount, type SavedAccount } from '../../lib/api';
+import {
+  login,
+  verify2faLogin,
+  register,
+  saveAccount,
+  getSavedAccounts,
+  removeSavedAccount,
+  clearAllSavedAccounts,
+  switchAccount,
+  type SavedAccount
+} from '../../lib/api';
 
 const copy = {
   login: {
@@ -32,6 +42,13 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
   const [email, setEmail] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
+
+  // 2FA Challenge state
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const [twoFactorPendingToken, setTwoFactorPendingToken] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [useBackupCode, setUseBackupCode] = useState(false);
+
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -48,27 +65,69 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
     }
   }, []);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
     setIsSubmitting(true);
 
     try {
-      let result;
-      if (mode === 'login') {
-        result = await login({ email, password });
-      } else {
-        result = await register({ name, email, phoneNumber, password });
+      const result = await register({ name, email, phoneNumber, password });
+      if (result && result.user && result.accessToken) {
+        saveAccount(result.user, result.accessToken);
+      }
+      router.replace(nextPath as never);
+      router.refresh();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Unable to complete registration');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // Login handler with 2FA interception
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setIsSubmitting(true);
+
+    try {
+      const result = await login({ email, password });
+      if (result.requires2FA && result.tempToken) {
+        setTwoFactorPendingToken(result.tempToken);
+        setTwoFactorRequired(true);
+        setError('');
+        setIsSubmitting(false);
+        return;
       }
 
       if (result && result.user && result.accessToken) {
         saveAccount(result.user, result.accessToken);
       }
-
       router.replace(nextPath as never);
       router.refresh();
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : 'Unable to continue');
+      setError(submitError instanceof Error ? submitError.message : 'Unable to sign in');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // 2FA verification submission
+  async function handleVerify2fa(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!twoFactorPendingToken || !twoFactorCode.trim()) return;
+
+    setError('');
+    setIsSubmitting(true);
+    try {
+      const result = await verify2faLogin(twoFactorPendingToken, twoFactorCode.trim());
+      if (result.user && result.accessToken) {
+        saveAccount(result.user, result.accessToken);
+        router.replace(nextPath as never);
+        router.refresh();
+      }
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Invalid 2FA code. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -94,12 +153,12 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
     setSavedAccounts(getSavedAccounts());
   };
 
-  const getInitials = (name: string) => {
-    const parts = name.trim().split(/\s+/);
+  const getInitials = (nameStr: string) => {
+    const parts = nameStr.trim().split(/\s+/);
     if (parts.length >= 2) {
       return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
     }
-    return name.slice(0, 2).toUpperCase();
+    return nameStr.slice(0, 2).toUpperCase();
   };
 
   const activeCopy = copy[mode];
@@ -195,11 +254,11 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
             <p className="max-w-xl text-lg leading-8 text-ink-600">{activeCopy.subtitle}</p>
           </div>
           <div className="grid max-w-2xl gap-4 sm:grid-cols-3">
-            {['JWT security', 'Expense tracking', 'Dashboard insights'].map((item) => (
+            {['Account Security', 'JWT Authentication', 'Dashboard Insights'].map((item) => (
               <div key={item} className="cash-card p-4">
                 <p className="text-sm font-semibold text-ink-900">{item}</p>
                 <p className="mt-2 text-sm leading-6 text-ink-500">
-                  Built for a modular backend, future encryption, and clean mobile-first flows.
+                  Built with verified security, modular services, and clean mobile flows.
                 </p>
               </div>
             ))}
@@ -207,17 +266,145 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
         </section>
 
         <section>
-          {isChooseAccountVisible ? (
+          {twoFactorRequired ? (
+            <div className="cash-card p-6 sm:p-8 bg-white shadow-card">
+              <div className="mb-6 space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
+                  <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  <span>Two-Factor Authentication</span>
+                </div>
+                <h2 className="text-3xl font-semibold text-ink-900">
+                  {useBackupCode ? 'Enter Backup Code' : 'Two-Factor Challenge'}
+                </h2>
+                <p className="text-sm text-ink-500">
+                  {useBackupCode
+                    ? 'Enter one of your emergency recovery codes (format: XXXXX-XXXXX).'
+                    : 'Open your Authenticator app (Google Authenticator, Microsoft Authenticator, Authy, etc.) and enter the 6-digit code.'}
+                </p>
+              </div>
+
+              <form className="space-y-4" onSubmit={handleVerify2fa}>
+                <div>
+                  <label className="cash-label" htmlFor="twoFactorCode">
+                    {useBackupCode ? 'Recovery Code' : '6-Digit Verification Code'}
+                  </label>
+                  <input
+                    id="twoFactorCode"
+                    type="text"
+                    className="cash-input text-center text-2xl tracking-widest font-mono font-bold"
+                    value={twoFactorCode}
+                    onChange={(event) => setTwoFactorCode(event.target.value.toUpperCase())}
+                    placeholder={useBackupCode ? 'XXXXX-XXXXX' : '000000'}
+                    maxLength={useBackupCode ? 15 : 6}
+                    autoFocus
+                    required
+                  />
+                </div>
+
+                {error ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {error}
+                  </div>
+                ) : null}
+
+                <button type="submit" className="cash-button-primary w-full" disabled={isSubmitting}>
+                  {isSubmitting ? 'Verifying...' : 'Verify & Continue'}
+                </button>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUseBackupCode(!useBackupCode);
+                      setTwoFactorCode('');
+                      setError('');
+                    }}
+                    className="text-xs font-semibold text-brand-700 hover:text-brand-800 transition"
+                  >
+                    {useBackupCode ? '← Use 6-digit Authenticator code' : 'Use emergency recovery code'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTwoFactorRequired(false);
+                      setTwoFactorPendingToken('');
+                      setTwoFactorCode('');
+                      setError('');
+                    }}
+                    className="text-xs font-medium text-ink-500 hover:text-ink-800 transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : isChooseAccountVisible ? (
             renderChooseAccount()
           ) : (
             <div className="cash-card p-6 sm:p-8 bg-white">
               <div className="mb-6 space-y-2">
-                <h2 className="text-3xl font-semibold text-ink-900">{activeCopy.submit}</h2>
-                <p className="text-sm text-ink-500">Use your email and password to continue.</p>
+                <h2 className="text-3xl font-semibold text-ink-900">
+                  {mode === 'login' ? 'Sign in' : 'Create account'}
+                </h2>
+                <p className="text-sm text-ink-500">
+                  {mode === 'login'
+                    ? 'Use your email and password to continue.'
+                    : 'Enter your details to create your account.'}
+                </p>
               </div>
 
-              <form className="space-y-4" onSubmit={handleSubmit}>
-                {mode === 'register' ? (
+              {/* LOGIN FORM */}
+              {mode === 'login' && (
+                <form className="space-y-4" onSubmit={handleLogin}>
+                  <div>
+                    <label className="cash-label" htmlFor="email">
+                      Email address
+                    </label>
+                    <input
+                      id="email"
+                      type="email"
+                      className="cash-input"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="alex@cashflow.app"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="cash-label" htmlFor="password">
+                      Password
+                    </label>
+                    <input
+                      id="password"
+                      type="password"
+                      className="cash-input"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="At least 8 characters"
+                      minLength={8}
+                      required
+                    />
+                  </div>
+
+                  {error ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {error}
+                    </div>
+                  ) : null}
+
+                  <button type="submit" className="cash-button-primary w-full" disabled={isSubmitting}>
+                    {isSubmitting ? 'Working...' : 'Sign in'}
+                  </button>
+                </form>
+              )}
+
+              {/* REGISTER FORM */}
+              {mode === 'register' && (
+                <form className="space-y-4" onSubmit={handleRegister}>
                   <div>
                     <label className="cash-label" htmlFor="name">
                       Full name
@@ -231,24 +418,22 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
                       required
                     />
                   </div>
-                ) : null}
 
-                <div>
-                  <label className="cash-label" htmlFor="email">
-                    Email address
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    className="cash-input"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="alex@cashflow.app"
-                    required
-                  />
-                </div>
+                  <div>
+                    <label className="cash-label" htmlFor="email">
+                      Email address
+                    </label>
+                    <input
+                      id="email"
+                      type="email"
+                      className="cash-input"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="alex@cashflow.app"
+                      required
+                    />
+                  </div>
 
-                {mode === 'register' ? (
                   <div>
                     <label className="cash-label" htmlFor="phoneNumber">
                       Phone number
@@ -263,34 +448,34 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
                       required
                     />
                   </div>
-                ) : null}
 
-                <div>
-                  <label className="cash-label" htmlFor="password">
-                    Password
-                  </label>
-                  <input
-                    id="password"
-                    type="password"
-                    className="cash-input"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="At least 8 characters"
-                    minLength={8}
-                    required
-                  />
-                </div>
-
-                {error ? (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {error}
+                  <div>
+                    <label className="cash-label" htmlFor="password">
+                      Password
+                    </label>
+                    <input
+                      id="password"
+                      type="password"
+                      className="cash-input"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="At least 8 characters"
+                      minLength={8}
+                      required
+                    />
                   </div>
-                ) : null}
 
-                <button type="submit" className="cash-button-primary w-full" disabled={isSubmitting}>
-                  {isSubmitting ? 'Working...' : activeCopy.submit}
-                </button>
-              </form>
+                  {error ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {error}
+                    </div>
+                  ) : null}
+
+                  <button type="submit" className="cash-button-primary w-full" disabled={isSubmitting}>
+                    {isSubmitting ? 'Creating account...' : activeCopy.submit}
+                  </button>
+                </form>
+              )}
 
               <div className="mt-6 flex flex-col gap-2.5">
                 <div className="text-sm text-ink-500">
@@ -315,4 +500,3 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
     </div>
   );
 }
-

@@ -32,6 +32,8 @@ Thumbs.db
 
 # SQLite database files and active writes
 *.db
+*.db*
+*.bak*
 *.db-wal
 *.db-shm
 *.db-journal
@@ -39,5 +41,6 @@ Thumbs.db
 # Specific SQLite files and backup directories
 backend/prisma/dev.db
 backend/prisma/dev.db.bak
-data/backups/
-data/production-initial.db
+data/*
+!data/.gitkeep
+backend/test-*.js

@@ -8,17 +8,25 @@ datasource db {
 }
 
 model User {
-  id                String       @id @default(cuid())
-  name              String
-  email             String       @unique
-  phoneNumber       String       @unique
-  passwordHash      String
-  createdAt         DateTime     @default(now())
-  expenses          Expense[]    @relation("ExpenseOwner")
-  receivedTransfers Expense[]    @relation("TransferRecipient")
-  ownedGroups       Group[]      @relation("GroupOwner")
-  memberGroups      Group[]      @relation("GroupMembers")
-  tags              Tag[]
+  id                     String                  @id @default(cuid())
+  name                   String
+  email                  String                  @unique
+  phoneNumber            String                  @unique
+  passwordHash           String
+  twoFactorEnabled       Boolean                 @default(false)
+  twoFactorSecret        String?
+  twoFactorTempSecret    String?
+  twoFactorRecoveryCodes String?
+  failedLoginAttempts    Int                     @default(0)
+  lockoutUntil           DateTime?
+  createdAt              DateTime                @default(now())
+  expenses               Expense[]               @relation("ExpenseOwner")
+  receivedTransfers      Expense[]               @relation("TransferRecipient")
+  ownedGroups            Group[]                 @relation("GroupOwner")
+  memberGroups           Group[]                 @relation("GroupMembers")
+  tags                   Tag[]
+  investments            Investment[]            @relation("UserInvestments")
+  investmentTransactions InvestmentTransaction[] @relation("UserInvestmentTransactions")
 }
 
 model Expense {
@@ -50,6 +58,7 @@ model Group {
   owner       User         @relation("GroupOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members     User[]       @relation("GroupMembers")
   invitations Invitation[]
+  adminIds    String       @default("[]")
 }
 
 model Invitation {
@@ -74,4 +83,41 @@ model Tag {
 
   @@unique([name, userId])
 }
+
+model Investment {
+  id           String                  @id @default(cuid())
+  code         String                  @default("") // Symbol or ticker code, e.g. AAPL, BTC-USD, RELIANCE.NS
+  name         String
+  type         String                  // Stock, Mutual Fund, ETF, Crypto, Gold, Real Estate
+  units        Float
+  buyPrice     Float
+  currentPrice Float
+  color        String
+  date         DateTime                @default(now())
+  userId       String
+  user         User                    @relation("UserInvestments", fields: [userId], references: [id], onDelete: Cascade)
+  transactions InvestmentTransaction[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  @@index([userId])
+}
+
+model InvestmentTransaction {
+  id           String     @id // PB... or PS...
+  type         String     @default("BUY") // BUY or SELL
+  units        Float
+  price        Float
+  amount       Float
+  date         DateTime   @default(now())
+  investmentId String
+  investment   Investment @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation("UserInvestmentTransactions", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@index([investmentId])
+  @@index([userId])
+}
+
 

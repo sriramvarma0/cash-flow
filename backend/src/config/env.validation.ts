@@ -5,6 +5,7 @@ type EnvConfig = {
   JWT_SECRET?: string;
   JWT_EXPIRES_IN?: string;
   BCRYPT_ROUNDS?: string;
+  NODE_ENV?: string;
 };
 
 export function validateEnv(config: EnvConfig) {
@@ -21,6 +22,7 @@ export function validateEnv(config: EnvConfig) {
     PORT: config.PORT ?? '4000',
     FRONTEND_URL: config.FRONTEND_URL ?? 'http://localhost:3000',
     JWT_EXPIRES_IN: config.JWT_EXPIRES_IN ?? '7d',
-    BCRYPT_ROUNDS: config.BCRYPT_ROUNDS ?? '12'
+    BCRYPT_ROUNDS: config.BCRYPT_ROUNDS ?? '12',
+    NODE_ENV: config.NODE_ENV ?? 'development'
   };
 }

@@ -3,6 +3,7 @@ name: Deploy to EC2
 on:
   push:
     branches:
+      - master
       - main
 
 permissions:
@@ -10,8 +11,37 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  pre-deploy-check:
+    name: Pre-deployment Quality Gate
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Lint Workspace
+        run: npm run lint
+
+      - name: Validate Prisma Schema
+        run: npx prisma validate --schema=backend/prisma/schema.prisma
+
+      - name: Build Check
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+
+  deploy:
+    name: Trigger EC2 Production Deployment
+    runs-on: ubuntu-latest
+    needs: [pre-deploy-check]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

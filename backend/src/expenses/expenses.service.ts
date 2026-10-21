@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { CreateExpensesBulkDto } from './dto/bulk-create-expense.dto';
+import { generateTransactionTrackingId } from '../common/utils/uuid7.util';
 
 @Injectable()
 export class ExpensesService {
@@ -99,8 +100,14 @@ export class ExpensesService {
       create: { name: tag, userId }
     }));
 
+    let id = generateTransactionTrackingId(dto.transactionType);
+    while (await this.prisma.expense.findUnique({ where: { id } })) {
+      id = generateTransactionTrackingId(dto.transactionType);
+    }
+
     return this.prisma.expense.create({
       data: {
+        id,
         userId,
         amount: dto.amount,
         category: dto.category?.trim() || null,
@@ -135,6 +142,8 @@ export class ExpensesService {
       }
     }
 
+    const createdIds = new Set<string>();
+
     return this.prisma.$transaction(
       dto.expenses.map((expenseDto) => {
         const uniqueTags = expenseDto.tags ? Array.from(new Set(expenseDto.tags.map((t) => t.trim()).filter(Boolean))) : [];
@@ -143,8 +152,15 @@ export class ExpensesService {
           create: { name: tag, userId }
         }));
 
+        let id = generateTransactionTrackingId(expenseDto.transactionType);
+        while (createdIds.has(id)) {
+          id = generateTransactionTrackingId(expenseDto.transactionType);
+        }
+        createdIds.add(id);
+
         return this.prisma.expense.create({
           data: {
+            id,
             userId,
             amount: expenseDto.amount,
             category: expenseDto.category?.trim() || null,
@@ -228,6 +244,44 @@ export class ExpensesService {
     });
 
     if (!expense) {
+      const invTx = await this.prisma.investmentTransaction.findFirst({
+        where: { id: expenseId, userId }
+      });
+      if (invTx) {
+        // Delete ONLY the transaction, NOT the asset!
+        await this.prisma.investmentTransaction.delete({ where: { id: expenseId } });
+
+        // Recalculate investment holding values with remaining transactions
+        const remainingTxs = await this.prisma.investmentTransaction.findMany({
+          where: { investmentId: invTx.investmentId },
+          orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
+        });
+        let units = 0;
+        let buyPrice = 0;
+        for (const tx of remainingTxs) {
+          if (tx.type === 'BUY') {
+            const cost = units * buyPrice + tx.units * tx.price;
+            units = units + tx.units;
+            buyPrice = units > 0 ? cost / units : tx.price;
+          } else if (tx.type === 'SELL') {
+            units = Math.max(0, units - tx.units);
+            if (units === 0) buyPrice = 0;
+          }
+        }
+        units = Math.round(units * 1e6) / 1e6;
+        buyPrice = Math.round(buyPrice * 1e4) / 1e4;
+
+        await this.prisma.investment.update({
+          where: { id: invTx.investmentId },
+          data: {
+            units,
+            buyPrice,
+            ...(remainingTxs.length > 0 ? { date: remainingTxs[0].date } : {})
+          }
+        });
+        return { deleted: true };
+      }
+
       throw new NotFoundException('Expense not found');
     }
 

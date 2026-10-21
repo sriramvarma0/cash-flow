@@ -1,0 +1,14 @@
+node_modules
+dist
+*.tsbuildinfo
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+prisma/*.db
+backups
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.DS_Store
