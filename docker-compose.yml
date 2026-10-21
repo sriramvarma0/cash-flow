@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   backend:
+    image: ${DOCKERHUB_USERNAME:-sriramvarma0}/cashflow-backend:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -29,6 +30,7 @@ services:
       start_period: 10s
 
   frontend:
+    image: ${DOCKERHUB_USERNAME:-sriramvarma0}/cashflow-frontend:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: frontend/Dockerfile
