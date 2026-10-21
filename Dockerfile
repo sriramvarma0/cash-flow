@@ -23,12 +23,16 @@ RUN npm ci
 FROM base AS builder
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
 COPY package*.json tsconfig.base.json* ./
 COPY backend ./backend
 COPY frontend ./frontend
 COPY scripts ./scripts
 
+# Copy node_modules from deps stage (root and workspace-specific)
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/backend/node_modules ./backend/node_modules
+
+ENV PATH="/app/backend/node_modules/.bin:/app/node_modules/.bin:${PATH}"
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV DATABASE_URL="file:./dev.db"
@@ -66,6 +70,7 @@ ENV INTERNAL_BACKEND_URL=http://127.0.0.1:4000
 ENV BACKEND_URL=http://127.0.0.1:4000
 ENV DATABASE_PROVIDER=d1
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_PATH=/app/node_modules
 
 # Install runtime utilities (curl for healthcheck)
 RUN apk add --no-cache curl

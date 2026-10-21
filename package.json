@@ -23,6 +23,7 @@
     "d1:migrate:dry": "node scripts/d1-migrate.js --dry-run"
   },
   "devDependencies": {
+    "@nestjs/cli": "^10.4.9",
     "concurrently": "^10.0.3"
   }
 }
