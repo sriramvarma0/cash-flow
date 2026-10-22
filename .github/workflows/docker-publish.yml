@@ -11,6 +11,9 @@ concurrency:
   group: docker-publish-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: 1. Code Quality & Build Verification
@@ -64,6 +67,9 @@ jobs:
     name: 2. Build & Push Unified Image to Docker Hub
     runs-on: ubuntu-latest
     needs: [verify]
+    outputs:
+      image_tag: ${{ steps.image-info.outputs.image_tag }}
+      short_sha: ${{ steps.image-info.outputs.short_sha }}
 
     steps:
       - name: Checkout Code
@@ -92,6 +98,21 @@ jobs:
             type=sha,format=short
             type=ref,event=branch
 
+      # Determine exact immutable image tag for deployment
+      - name: Determine immutable image tag
+        id: image-info
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          SHA_TAG=$(echo "${{ steps.meta.outputs.tags }}" | grep -E ':sha-[0-9a-f]+' | head -n 1 || true)
+          if [ -n "$SHA_TAG" ]; then
+            IMAGE_TAG="docker.io/${SHA_TAG#docker.io/}"
+          else
+            IMAGE_TAG="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/cashflow:sha-${SHORT_SHA}"
+          fi
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Prepared immutable deployment image: ${IMAGE_TAG}"
+
       # Build and Push Single Unified Image
       - name: Build & Push Single Production Image
         uses: docker/build-push-action@v5
@@ -104,3 +125,222 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-azure:
+    name: 3. Deploy to Azure Container Apps
+    runs-on: ubuntu-latest
+    needs: [docker-publish]
+    if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CONTAINER_APP_NAME: "cash-flow"
+      RESOURCE_GROUP: "cash-flow-container"
+
+    steps:
+      - name: Resolve deployment image
+        id: resolve-image
+        run: |
+          IMAGE="${{ needs.docker-publish.outputs.image_tag }}"
+          if [ -z "$IMAGE" ]; then
+            SHORT_SHA="${{ needs.docker-publish.outputs.short_sha }}"
+            if [ -z "$SHORT_SHA" ]; then
+              SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            fi
+            USERNAME="${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME || 'sriramvarma0' }}"
+            IMAGE="docker.io/${USERNAME}/cashflow:sha-${SHORT_SHA}"
+          fi
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Deploying image: ${IMAGE}"
+
+      - name: Check Azure Authentication Configuration
+        id: auth-check
+        run: |
+          CLIENT_ID="${{ vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}"
+          TENANT_ID="${{ vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}"
+          SUBSCRIPTION_ID="${{ vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}"
+          CREDS="${{ secrets.AZURE_CREDENTIALS }}"
+
+          HAS_OIDC="false"
+          HAS_CREDS="false"
+
+          if [ -n "$CLIENT_ID" ] && [ -n "$TENANT_ID" ] && [ -n "$SUBSCRIPTION_ID" ]; then
+            HAS_OIDC="true"
+          fi
+
+          if [ -n "$CREDS" ]; then
+            HAS_CREDS="true"
+          fi
+
+          echo "has_oidc=${HAS_OIDC}" >> "$GITHUB_OUTPUT"
+          echo "has_creds=${HAS_CREDS}" >> "$GITHUB_OUTPUT"
+
+          if [ "$HAS_OIDC" = "true" ]; then
+            echo "Azure authentication method: GitHub OIDC (Federated Identity)"
+          elif [ "$HAS_CREDS" = "true" ]; then
+            echo "Azure authentication method: Service Principal (AZURE_CREDENTIALS secret)"
+          else
+            echo "::error::No Azure authentication configuration found."
+            echo "=========================================================================="
+            echo "MISSING AZURE CREDENTIALS"
+            echo "To enable deployment, configure one of the following in GitHub Settings:"
+            echo ""
+            echo "Option A (Recommended - OIDC Federated Credentials):"
+            echo "  1. Add Repository Variables (or Secrets):"
+            echo "     - AZURE_CLIENT_ID (App Registration / Managed Identity Client ID)"
+            echo "     - AZURE_TENANT_ID (Microsoft Entra Tenant ID)"
+            echo "     - AZURE_SUBSCRIPTION_ID (Azure Subscription ID)"
+            echo "  2. In Azure Entra ID > App Registration > Certificates & secrets > Federated credentials:"
+            echo "     - Add credential with Scenario: GitHub Actions deploying Azure resources"
+            echo "     - Organization: sriramvarma0"
+            echo "     - Repository: cash-flow"
+            echo "     - Entity Type: Branch"
+            echo "     - Branch name: master"
+            echo ""
+            echo "Option B (Fallback - Service Principal Secret):"
+            echo "  - Add Repository Secret: AZURE_CREDENTIALS"
+            echo "    (JSON output from: az ad sp create-for-rbac --name \"cash-flow-deployer\" ...)"
+            echo "=========================================================================="
+            exit 1
+          fi
+
+      - name: Log in to Azure via OIDC
+        if: steps.auth-check.outputs.has_oidc == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to Azure via Credentials Secret
+        if: steps.auth-check.outputs.has_oidc != 'true' && steps.auth-check.outputs.has_creds == 'true'
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup Azure CLI Container Apps Extension
+        run: |
+          echo "Ensuring containerapp CLI extension is installed and up to date..."
+          az extension add --name containerapp --upgrade --yes
+
+      - name: Update Azure Container App Image
+        id: deploy
+        run: |
+          DEPLOY_IMAGE="${{ steps.resolve-image.outputs.image }}"
+          echo "Updating Container App '${CONTAINER_APP_NAME}' in Resource Group '${RESOURCE_GROUP}'..."
+          echo "Target Image: ${DEPLOY_IMAGE}"
+
+          az containerapp update \
+            --name "${CONTAINER_APP_NAME}" \
+            --resource-group "${RESOURCE_GROUP}" \
+            --image "${DEPLOY_IMAGE}"
+
+      - name: Verify Deployment and Revision Health
+        run: |
+          DEPLOY_IMAGE="${{ steps.resolve-image.outputs.image }}"
+          echo "Verifying configured image on Azure Container App '${CONTAINER_APP_NAME}'..."
+
+          CURRENT_IMAGE=$(az containerapp show \
+            --name "${CONTAINER_APP_NAME}" \
+            --resource-group "${RESOURCE_GROUP}" \
+            --query "properties.template.containers[0].image" -o tsv)
+
+          echo "Current Container App Image: ${CURRENT_IMAGE}"
+          echo "Expected Deployment Image:   ${DEPLOY_IMAGE}"
+
+          NORM_CURRENT=$(echo "${CURRENT_IMAGE}" | sed 's|^docker\.io/||')
+          NORM_EXPECTED=$(echo "${DEPLOY_IMAGE}" | sed 's|^docker\.io/||')
+
+          if [ "${NORM_CURRENT}" != "${NORM_EXPECTED}" ]; then
+            echo "::error::Image tag mismatch! Configured image is '${CURRENT_IMAGE}', but expected '${DEPLOY_IMAGE}'."
+            exit 1
+          fi
+          echo "✅ Configured image matches target image: ${CURRENT_IMAGE}"
+
+          LATEST_REV=$(az containerapp show \
+            --name "${CONTAINER_APP_NAME}" \
+            --resource-group "${RESOURCE_GROUP}" \
+            --query "properties.latestRevisionName" -o tsv)
+
+          echo "Latest Revision: ${LATEST_REV}"
+          echo "Monitoring revision '${LATEST_REV}' provisioning status..."
+
+          MAX_ATTEMPTS=24
+          INTERVAL=5
+          SUCCESS=false
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            REV_JSON=$(az containerapp revision show \
+              --name "${CONTAINER_APP_NAME}" \
+              --resource-group "${RESOURCE_GROUP}" \
+              --revision "${LATEST_REV}" \
+              --query "{provisioning:properties.provisioningState, running:properties.runningState, health:properties.healthState}" \
+              -o json 2>/dev/null || echo "{}")
+
+            PROV_STATE=$(echo "$REV_JSON" | jq -r '.provisioning // "Unknown"')
+            RUN_STATE=$(echo "$REV_JSON" | jq -r '.running // "Unknown"')
+            HEALTH_STATE=$(echo "$REV_JSON" | jq -r '.health // "Unknown"')
+
+            echo "[$i/$MAX_ATTEMPTS] Revision status: Provisioning=${PROV_STATE}, Running=${RUN_STATE}, Health=${HEALTH_STATE}"
+
+            if [ "$PROV_STATE" = "Provisioned" ]; then
+              if [ "$HEALTH_STATE" = "Unhealthy" ]; then
+                echo "::error::Revision reached Provisioned state but reports Unhealthy health state."
+                SUCCESS=false
+                break
+              fi
+              SUCCESS=true
+              break
+            elif [ "$PROV_STATE" = "Failed" ]; then
+              echo "::error::Revision provisioning failed!"
+              SUCCESS=false
+              break
+            fi
+
+            sleep $INTERVAL
+          done
+
+          if [ "$SUCCESS" != "true" ]; then
+            echo "::error::Revision ${LATEST_REV} failed to reach healthy Provisioned state."
+            echo "=== Detailed Revision Info ==="
+            az containerapp revision show \
+              --name "${CONTAINER_APP_NAME}" \
+              --resource-group "${RESOURCE_GROUP}" \
+              --revision "${LATEST_REV}" \
+              -o json || true
+
+            echo "=== Container App System Logs (Last 50 lines) ==="
+            az containerapp logs show \
+              --name "${CONTAINER_APP_NAME}" \
+              --resource-group "${RESOURCE_GROUP}" \
+              --revision "${LATEST_REV}" \
+              --type system \
+              --tail 50 || true
+
+            echo "=== Container App Console Logs (Last 50 lines) ==="
+            az containerapp logs show \
+              --name "${CONTAINER_APP_NAME}" \
+              --resource-group "${RESOURCE_GROUP}" \
+              --revision "${LATEST_REV}" \
+              --type console \
+              --tail 50 || true
+
+            exit 1
+          fi
+
+          echo "=========================================================================="
+          echo "✅ DEPLOYMENT VERIFIED SUCCESSFULLY"
+          echo "Container App: ${CONTAINER_APP_NAME}"
+          echo "Resource Group: ${RESOURCE_GROUP}"
+          echo "Revision: ${LATEST_REV}"
+          echo "Image: ${CURRENT_IMAGE}"
+          echo "Provisioning State: ${PROV_STATE}"
+          echo "Running State: ${RUN_STATE}"
+          echo "=========================================================================="
+
+      - name: Log out from Azure
+        if: always()
+        run: |
+          az logout || true
+          echo "Cleared Azure CLI session."
