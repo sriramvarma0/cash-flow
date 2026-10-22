@@ -38,6 +38,7 @@ import { TransactionForm } from './components/TransactionForm';
 import { AIBulkAdd } from './components/AIBulkAdd';
 import { DashboardHeader } from './components/DashboardHeader';
 import { ExpenseTable } from './components/ExpenseTable';
+import { TransactionSuccessCelebration, SuccessData } from './components/TransactionSuccessCelebration';
 
 const paymentMethods = ['Card', 'Cash', 'Bank transfer', 'Wallet'];
 const categoryPalette = ['#0d533c', '#17a66b', '#3ecb8e', '#7fe0b5', '#a6bbbb', '#5b7676'];
@@ -105,12 +106,12 @@ function getTransactionTitle(expense: Expense, currentUserId?: string | null) {
     }
   }
   if (expense.transactionType === 'INCOME') {
-    return `Income: ${expense.category || 'General'}`;
+    return expense.category ? `Income: ${expense.category}` : 'Income: ⚠️ Uncategorized';
   }
   if (expense.transactionType === 'INVESTMENT') {
     return `Investment: ${expense.category || 'Portfolio'}`;
   }
-  return expense.category || 'Expense';
+  return expense.category || '⚠️ Uncategorized';
 }
 
 function getAmountDisplay(expense: Expense, currentUserId?: string | null) {
@@ -135,6 +136,7 @@ function getCategoryIcon(category?: string | null, transactionType?: string | nu
   if (transactionType === 'TRANSFER') return '🔄';
   if (transactionType === 'INCOME') return '💰';
   if (transactionType === 'INVESTMENT') return '📈';
+  if (!category || category.trim() === '' || category.toLowerCase() === 'uncategorized') return '⚠️';
   const cat = (category || '').toLowerCase();
   if (cat.includes('groc') || cat.includes('food') || cat.includes('rest') || cat.includes('bev') || cat.includes('eat') || cat.includes('dining')) return '🍔';
   if (cat.includes('fuel') || cat.includes('petrol') || cat.includes('diesel') || cat.includes('gas')) return '⛽';
@@ -204,6 +206,15 @@ export function DashboardView() {
   const [isPwaActive, setIsPwaActive] = useState(false);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [showCustomInput, setShowCustomInput] = useState(false);
+  const [successData, setSuccessData] = useState<SuccessData | null>(null);
+
+  const handleDismissCelebration = () => {
+    setSuccessData(null);
+    setIsQuickOpen(false);
+    setShowCustomInput(false);
+    setForm(emptyForm(pathname === '/income' ? 'INCOME' : 'EXPENSE'));
+    setEditingId(null);
+  };
 
   // Synchronize height of recent activity card to match the left form card
   const leftFormRef = useRef<HTMLDivElement>(null);
@@ -880,7 +891,7 @@ My expenses:
     try {
       const payload = {
         amount: Number(form.amount),
-        category: form.transactionType === 'TRANSFER' ? 'Transfer' : form.category || 'General',
+        category: form.transactionType === 'TRANSFER' ? 'Transfer' : (form.category?.trim() || ''),
         description: form.description,
         paymentMethod: form.paymentMethod,
         date: (() => {
@@ -902,6 +913,15 @@ My expenses:
         await createExpense(payload);
       }
 
+      // Trigger UPI / Google Pay style celebration with confetti and central green tick
+      setSuccessData({
+        amount: payload.amount,
+        description: payload.description,
+        category: payload.category,
+        transactionType: payload.transactionType,
+        date: payload.date
+      });
+
       if (
         payload.category &&
         payload.transactionType !== 'TRANSFER' &&
@@ -914,9 +934,6 @@ My expenses:
         }
       }
 
-      setShowCustomInput(false);
-      setForm(emptyForm(pathname === '/income' ? 'INCOME' : 'EXPENSE'));
-      setEditingId(null);
       await loadExpenses();
     } catch (submitError) {
       setError(
@@ -1867,6 +1884,12 @@ My expenses:
           </div>
         </div>
       </div>
+
+      {/* Google Pay / UPI Style Confetti & Green Tick Success Celebration */}
+      <TransactionSuccessCelebration
+        data={successData}
+        onDismiss={handleDismissCelebration}
+      />
     </div>
   );
 }

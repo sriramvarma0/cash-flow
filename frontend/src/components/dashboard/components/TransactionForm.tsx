@@ -186,7 +186,7 @@ export function TransactionForm({
         {/* Large Amount Field */}
         <div>
           <label className="cash-label text-center block mb-2" htmlFor="quickAmount">
-            Amount
+            Amount <span className="text-rose-500 font-bold">*</span>
           </label>
           <div
             onClick={() => quickAmountRef?.current?.focus()}
@@ -213,7 +213,7 @@ export function TransactionForm({
         {/* Description/Note */}
         <div>
           <label className="cash-label" htmlFor="quickDescription">
-            Description
+            Description <span className="text-rose-500 font-bold">*</span>
           </label>
           <input
             id="quickDescription"
@@ -235,7 +235,18 @@ export function TransactionForm({
 
         {/* Category Tap Chips */}
         <div>
-          <label className="cash-label mb-2 block">Quick Categories</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="cash-label">Quick Categories (Optional)</label>
+            {form.category && (
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, category: '', categoryType: '' })}
+                className="text-[11px] font-semibold text-rose-600 hover:text-rose-800"
+              >
+                Clear category
+              </button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2">
             {quickCategories.map((item) => {
               const isSelected =
@@ -246,12 +257,20 @@ export function TransactionForm({
                   type="button"
                   onClick={() => {
                     setShowCustomInput(false);
-                    setForm({
-                      ...form,
-                      transactionType: item.type,
-                      category: item.type === 'TRANSFER' ? 'Transfer' : item.category,
-                      toUserId: item.type === 'TRANSFER' ? form.toUserId : ''
-                    });
+                    if (isSelected) {
+                      setForm({
+                        ...form,
+                        category: '',
+                        categoryType: ''
+                      });
+                    } else {
+                      setForm({
+                        ...form,
+                        transactionType: item.type,
+                        category: item.type === 'TRANSFER' ? 'Transfer' : item.category,
+                        toUserId: item.type === 'TRANSFER' ? form.toUserId : ''
+                      });
+                    }
                   }}
                   className={`px-4 py-2 rounded-full border text-xs font-semibold transition-all ${
                     isSelected
@@ -270,7 +289,7 @@ export function TransactionForm({
         {form.transactionType !== 'TRANSFER' && (
           <div className="space-y-2">
             <label className="cash-label" htmlFor="quickCategorySelect">
-              Or Select Other Category
+              Or Select Other Category (Optional)
             </label>
             <select
               id="quickCategorySelect"
@@ -294,9 +313,8 @@ export function TransactionForm({
                   setForm({ ...form, category: val });
                 }
               }}
-              required={form.transactionType === 'EXPENSE'}
             >
-              <option value="">Select Category</option>
+              <option value="">No category (leave uncategorized ⚠️)</option>
               {allCategories.map((cat) => (
                 <option key={cat} value={cat}>
                   {cat}
@@ -315,8 +333,7 @@ export function TransactionForm({
                     className="cash-input text-xs"
                     value={form.category}
                     onChange={(event) => setForm({ ...form, category: event.target.value })}
-                    placeholder="Enter custom category name"
-                    required
+                    placeholder="Enter custom category name (optional)"
                   />
                 </div>
                 <button

@@ -148,7 +148,9 @@ export function ExpenseTable({
       });
     }
 
-    if (categoryFilter) {
+    if (categoryFilter === '__UNCATEGORIZED__') {
+      list = list.filter((e) => !e.category || e.category.trim() === '' || e.category.toLowerCase() === 'uncategorized');
+    } else if (categoryFilter) {
       list = list.filter(
         (e) => e.category && e.category.toLowerCase() === categoryFilter.toLowerCase()
       );
@@ -328,6 +330,7 @@ export function ExpenseTable({
             }}
           >
             <option value="">All Categories</option>
+            <option value="__UNCATEGORIZED__">⚠️ Uncategorized (Missing)</option>
             {allCategories.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -623,9 +626,17 @@ export function ExpenseTable({
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/70">
                           <span>🔄</span> Transfer
                         </span>
+                      ) : !expense.category || expense.category.trim() === '' || expense.category.toLowerCase() === 'uncategorized' ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/90 shadow-2xs"
+                          title="Category not mentioned"
+                        >
+                          <span className="text-amber-500 font-bold">⚠️</span>
+                          <span>Uncategorized</span>
+                        </span>
                       ) : (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-ink-100 text-ink-800">
-                          {expense.category || 'General'}
+                          {expense.category}
                         </span>
                       )}
                     </td>

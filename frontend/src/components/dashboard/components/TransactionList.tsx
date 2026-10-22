@@ -32,12 +32,12 @@ function getTransactionTitle(expense: Expense, currentUserId?: string) {
     }
   }
   if (expense.transactionType === 'INCOME') {
-    return `Income: ${expense.category || 'General'}`;
+    return expense.category ? `Income: ${expense.category}` : 'Income: ⚠️ Uncategorized';
   }
   if (expense.transactionType === 'INVESTMENT') {
     return `Investment: ${expense.category || 'Portfolio'}`;
   }
-  return expense.category || 'Expense';
+  return expense.category || '⚠️ Uncategorized';
 }
 
 function getAmountDisplay(expense: Expense, currentUserId?: string) {
@@ -287,8 +287,20 @@ export function TransactionList({
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-ink-700">
-                        {getTransactionTitle(expense, currentUser?.id)}
+                      <td className="px-6 py-4 text-ink-700 whitespace-nowrap">
+                        {expense.transactionType === 'TRANSFER' ? (
+                          <span>{getTransactionTitle(expense, currentUser?.id)}</span>
+                        ) : !expense.category || expense.category.trim() === '' || expense.category.toLowerCase() === 'uncategorized' ? (
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/90 shadow-2xs"
+                            title="Category not mentioned"
+                          >
+                            <span className="text-amber-500 font-bold">⚠️</span>
+                            <span className="italic">Uncategorized</span>
+                          </span>
+                        ) : (
+                          <span>{getTransactionTitle(expense, currentUser?.id)}</span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         {expense.categoryType === 'ESSENTIALS' && (
