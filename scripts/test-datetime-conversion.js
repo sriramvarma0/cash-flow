@@ -20,16 +20,22 @@
  *    - InvestmentTransaction (date, createdAt)
  */
 
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
 const { PrismaClient } = require('@prisma/client');
 const { PrismaD1 } = require('@prisma/adapter-d1');
 
-// Import production createD1HttpClient
-let createD1HttpClient;
-try {
-  ({ createD1HttpClient } = require('../backend/dist/prisma/d1-http-client'));
-} catch {
-  ({ createD1HttpClient } = require('./backend/dist/prisma/d1-http-client'));
+// Import production createD1HttpClient (ensuring backend dist is built if running pre-build in CI)
+const distFile = path.resolve(__dirname, '../backend/dist/prisma/d1-http-client.js');
+if (!fs.existsSync(distFile)) {
+  console.log('[test-datetime-conversion] Building backend to compile production d1-http-client...');
+  execSync('npm run build --workspace backend', {
+    cwd: path.resolve(__dirname, '..'),
+    stdio: 'inherit'
+  });
 }
+const { createD1HttpClient } = require(distFile);
 
 let passedTests = 0;
 let totalTests = 0;
