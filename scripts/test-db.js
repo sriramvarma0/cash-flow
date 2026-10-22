@@ -61,20 +61,33 @@ async function testDatabase() {
       'updatedat',
       'lockoutuntil',
       'date',
-      'started_at',
-      'finished_at',
-      'rolled_back_at'
+      'startedat',
+      'finishedat',
+      'rolledbackat'
     ]);
+
+    function cleanColumnName(colName) {
+      if (!colName) return '';
+      return colName
+        .replace(/[`"']/g, '')
+        .split('.')
+        .pop()
+        .replace(/_/g, '')
+        .toLowerCase();
+    }
 
     function isDateTimeColumn(colName) {
       if (!colName) return false;
-      return DATETIME_COLUMN_NAMES.has(colName.toLowerCase());
+      return DATETIME_COLUMN_NAMES.has(cleanColumnName(colName));
     }
 
     function normalizeD1Value(val, colName) {
       if (val === null || val === undefined) return val;
+      const isDate =
+        isDateTimeColumn(colName) ||
+        (!colName && typeof val === 'number' && val > 100000000000);
       if (
-        isDateTimeColumn(colName) &&
+        isDate &&
         typeof val === 'number' &&
         Number.isFinite(val) &&
         val > 100000000000
@@ -123,9 +136,12 @@ async function testDatabase() {
             const res = await executeSql(query, bound);
             const rows = res.results || [];
             if (rows.length === 0) return options?.columnNames ? [[]] : [];
-            const cols = Object.keys(rows[0]);
-            const arr = rows.map((r) => cols.map((c) => normalizeD1Value(r[c], c)));
-            return options?.columnNames ? [cols, ...arr] : arr;
+            const rawCols = Object.keys(rows[0]);
+            const cleanCols = rawCols.map((c) =>
+              c.replace(/[`"']/g, '').split('.').pop()
+            );
+            const arr = rows.map((r) => rawCols.map((c) => normalizeD1Value(r[c], c)));
+            return options?.columnNames ? [cleanCols, ...arr] : arr;
           }
         };
       },

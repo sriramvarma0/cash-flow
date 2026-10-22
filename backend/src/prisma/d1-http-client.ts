@@ -70,14 +70,24 @@ const DATETIME_COLUMN_NAMES = new Set([
   'updatedat',
   'lockoutuntil',
   'date',
-  'started_at',
-  'finished_at',
-  'rolled_back_at'
+  'startedat',
+  'finishedat',
+  'rolledbackat'
 ]);
+
+function cleanColumnName(colName: string): string {
+  if (!colName) return '';
+  return colName
+    .replace(/[`"']/g, '')
+    .split('.')
+    .pop()!
+    .replace(/_/g, '')
+    .toLowerCase();
+}
 
 function isDateTimeColumn(colName: string): boolean {
   if (!colName) return false;
-  return DATETIME_COLUMN_NAMES.has(colName.toLowerCase());
+  return DATETIME_COLUMN_NAMES.has(cleanColumnName(colName));
 }
 
 /**
@@ -92,8 +102,11 @@ function isDateTimeColumn(colName: string): boolean {
  */
 function normalizeD1Value(val: any, colName: string): any {
   if (val === null || val === undefined) return val;
+  const isDate =
+    isDateTimeColumn(colName) ||
+    (!colName && typeof val === 'number' && val > 100000000000);
   if (
-    isDateTimeColumn(colName) &&
+    isDate &&
     typeof val === 'number' &&
     Number.isFinite(val) &&
     val > 100000000000
@@ -160,7 +173,9 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
       throw new Error(formatted);
     }
 
-    const statementResult = responseData.result?.[0] || {};
+    const statementResult = Array.isArray(responseData.result)
+      ? responseData.result[0] || {}
+      : responseData.result || {};
     return {
       results: statementResult.results || [],
       success: statementResult.success ?? true,
@@ -192,7 +207,12 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
           if (!row || typeof row !== 'object') return row;
           const clone: any = { ...row };
           for (const k of Object.keys(clone)) {
-            clone[k] = normalizeD1Value(clone[k], k);
+            const normalizedVal = normalizeD1Value(clone[k], k);
+            clone[k] = normalizedVal;
+            const cleanKey = k.replace(/[`"']/g, '').split('.').pop()!;
+            if (cleanKey !== k) {
+              clone[cleanKey] = normalizedVal;
+            }
           }
           return clone;
         });
@@ -207,10 +227,21 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
         const res = await executeSql(query, boundParams);
         const firstRow = res.results?.[0];
         if (!firstRow) return null;
-        if (colName) return normalizeD1Value(firstRow[colName] ?? null, colName);
+        if (colName) {
+          const matchedKey =
+            Object.keys(firstRow).find(
+              (k) => cleanColumnName(k) === cleanColumnName(colName)
+            ) || colName;
+          return normalizeD1Value(firstRow[matchedKey] ?? null, colName);
+        }
         const clone: any = { ...firstRow };
         for (const k of Object.keys(clone)) {
-          clone[k] = normalizeD1Value(clone[k], k);
+          const normalizedVal = normalizeD1Value(clone[k], k);
+          clone[k] = normalizedVal;
+          const cleanKey = k.replace(/[`"']/g, '').split('.').pop()!;
+          if (cleanKey !== k) {
+            clone[cleanKey] = normalizedVal;
+          }
         }
         return clone as T;
       },
@@ -224,13 +255,17 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
           return options?.columnNames ? [[]] : [];
         }
 
-        const columnNames = Object.keys(rows[0]);
+        const rawColumns = Object.keys(rows[0]);
+        // Strip table/schema prefixes and quotes so Prisma Query Engine gets clean column names
+        const cleanedColumns = rawColumns.map((col) =>
+          col.replace(/[`"']/g, '').split('.').pop()!
+        );
         const rowArrays = rows.map((r) =>
-          columnNames.map((col) => normalizeD1Value(r[col], col))
+          rawColumns.map((col) => normalizeD1Value(r[col], col))
         );
 
         if (options?.columnNames) {
-          return [columnNames, ...rowArrays];
+          return [cleanedColumns, ...rowArrays];
         }
         return rowArrays;
       }

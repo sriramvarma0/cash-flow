@@ -1,117 +1,118 @@
 #!/usr/bin/env node
 
 /**
- * CashFlow DateTime Conversion & Driver Adapter Test Suite
+ * CashFlow DateTime Conversion & Driver Adapter Regression Test Suite
  * 
- * Verifies that:
- * 1. User findUnique() (AuthService.login query path) succeeds when D1 returns:
- *    - Legacy Unix epoch millisecond integers (e.g. 1783245388569)
- *    - ISO-8601 UTC strings (e.g. '2026-07-05T09:56:28.569Z')
- *    - Standard SQLite datetime strings (e.g. '2026-07-05 09:56:28')
- * 2. Every model with DateTime fields reads properly and returns valid JavaScript Date objects:
+ * Verifies that the production Cloudflare D1 HTTP client and @prisma/adapter-d1
+ * correctly parse DateTime values across all column naming and timestamp scenarios:
+ * 1. Plain column names (e.g. createdAt = 1783245388569)
+ * 2. Table-qualified column names (e.g. User.createdAt = 1783245388569) [Production Regression]
+ * 3. Schema+Table-qualified column names (e.g. main.User.createdAt = 1783245388569)
+ * 4. Backtick-quoted column names (e.g. `User`.`createdAt` = 1783245388569)
+ * 5. ISO-8601 UTC string formats (e.g. '2026-07-05T09:56:28.569Z')
+ * 6. Nullable DateTime columns (e.g. lockoutUntil = null vs lockoutUntil = 1783246388569)
+ * 7. All models with DateTime fields:
  *    - User (createdAt, lockoutUntil)
  *    - Expense (date, createdAt)
  *    - Group (createdAt)
  *    - Invitation (createdAt)
  *    - Investment (date, createdAt, updatedAt)
  *    - InvestmentTransaction (date, createdAt)
- * 3. DateTime values round-trip with bit-for-bit millisecond precision.
- * 4. Write path (insert/update) correctly handles Date objects and ISO strings.
  */
 
 const { PrismaClient } = require('@prisma/client');
 const { PrismaD1 } = require('@prisma/adapter-d1');
 
-const DATETIME_COLUMN_NAMES = new Set([
-  'createdat',
-  'updatedat',
-  'lockoutuntil',
-  'date',
-  'started_at',
-  'finished_at',
-  'rolled_back_at'
-]);
-
-function isDateTimeColumn(colName) {
-  if (!colName) return false;
-  return DATETIME_COLUMN_NAMES.has(colName.toLowerCase());
+// Import production createD1HttpClient
+let createD1HttpClient;
+try {
+  ({ createD1HttpClient } = require('../backend/dist/prisma/d1-http-client'));
+} catch {
+  ({ createD1HttpClient } = require('./backend/dist/prisma/d1-http-client'));
 }
 
-function normalizeD1Value(val, colName) {
-  if (val === null || val === undefined) return val;
-  if (
-    isDateTimeColumn(colName) &&
-    typeof val === 'number' &&
-    Number.isFinite(val) &&
-    val > 100000000000
-  ) {
-    return new Date(val).toISOString();
+let passedTests = 0;
+let totalTests = 0;
+
+function assert(condition, testName) {
+  totalTests++;
+  if (condition) {
+    console.log(`  ✅ PASS: ${testName}`);
+    passedTests++;
+  } else {
+    console.error(`  ❌ FAIL: ${testName}`);
+    throw new Error(`Test assertion failed: ${testName}`);
   }
-  return val;
 }
 
-function createMockD1Database(mockTables) {
-  return {
-    prepare(query) {
-      let bound = [];
-      return {
-        bind(...args) {
-          bound = args;
-          return this;
-        },
-        async run() {
-          return { success: true, meta: { changes: 1, last_row_id: 1, duration: 0 } };
-        },
-        async all() {
-          for (const [tbl, data] of Object.entries(mockTables)) {
-            if (query.toLowerCase().includes(`\`${tbl.toLowerCase()}\``) || query.toLowerCase().includes(`"${tbl.toLowerCase()}"`)) {
-              const rows = data.rows.map((r) => {
-                const obj = {};
-                data.columns.forEach((col, i) => {
-                  obj[col] = normalizeD1Value(r[i], col);
-                });
-                return obj;
-              });
-              return { results: rows, success: true, meta: {} };
-            }
-          }
-          return { results: [], success: true, meta: {} };
-        },
-        async first(col) {
-          const res = await this.all();
-          const first = res.results?.[0];
-          return col ? first?.[col] : first;
-        },
-        async raw(options) {
-          for (const [tbl, data] of Object.entries(mockTables)) {
-            if (query.toLowerCase().includes(`\`${tbl.toLowerCase()}\``) || query.toLowerCase().includes(`"${tbl.toLowerCase()}"`)) {
-              let rows = data.rows;
-              if (bound && bound.length > 0) {
-                const match = rows.filter((r) => r.some((val) => val === bound[0]));
-                if (match.length > 0) rows = match;
-              }
-              const normalizedRows = rows.map((r) =>
-                data.columns.map((col, idx) => normalizeD1Value(r[idx], col))
-              );
-              if (options && options.columnNames) {
-                return [data.columns, ...normalizedRows];
-              }
-              return normalizedRows;
-            }
-          }
-          if (options && options.columnNames) return [[]];
-          return [];
+/**
+ * Creates a Prisma Client hooked up to createD1HttpClient with mock fetch
+ * returning the specified database tables/rows as Cloudflare D1 REST API responses.
+ */
+function createPrismaWithMockD1(tableResponses) {
+  const mockFetch = async (url, options) => {
+    const body = JSON.parse(options.body || '{}');
+    const sql = (body.sql || '').trim();
+
+    for (const [tblKey, rows] of Object.entries(tableResponses)) {
+      if (sql.toLowerCase().includes(`\`${tblKey.toLowerCase()}\``) ||
+          sql.toLowerCase().includes(`"${tblKey.toLowerCase()}"`)) {
+        let matchedRows = rows;
+        if (body.params && body.params.length > 0) {
+          const filterVal = body.params[0];
+          const filtered = rows.filter((r) =>
+            Object.values(r).some((v) => v === filterVal)
+          );
+          if (filtered.length > 0) matchedRows = filtered;
         }
-      };
-    },
-    async batch() {
-      return [];
-    },
-    async exec() {
-      return { count: 0, duration: 0 };
-    },
-    async dump() {
-      return new ArrayBuffer(0);
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            errors: [],
+            messages: [],
+            result: [
+              {
+                success: true,
+                meta: { changes: 0, last_row_id: 0, duration: 1 },
+                results: matchedRows
+              }
+            ]
+          })
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      json: async () => ({
+        success: true,
+        errors: [],
+        messages: [],
+        result: [{ success: true, meta: { changes: 0 }, results: [] }]
+      })
+    };
+  };
+
+  // Temporarily swap global fetch during query execution
+  const originalFetch = global.fetch;
+  global.fetch = mockFetch;
+
+  const d1Client = createD1HttpClient({
+    accountId: 'test-account',
+    databaseId: 'test-db',
+    apiToken: 'test-token'
+  });
+
+  const adapter = new PrismaD1(d1Client);
+  const prisma = new PrismaClient({ adapter });
+
+  return {
+    prisma,
+    cleanup: async () => {
+      global.fetch = originalFetch;
+      await prisma.$disconnect();
     }
   };
 }
@@ -119,168 +120,185 @@ function createMockD1Database(mockTables) {
 async function runTestSuite() {
   console.log('================================================================');
   console.log('  CashFlow DateTime Conversion & Driver Adapter Test Suite');
+  console.log('  Testing Actual Production createD1HttpClient & PrismaD1');
   console.log('================================================================\n');
 
-  let passedTests = 0;
-  let totalTests = 0;
+  // --- TEST GROUP 1: Production Regression Scenarios (User findUnique) ---
+  console.log('[Test Group 1] Production Regression: AuthService.login() / User.findUnique()');
 
-  function assert(condition, testName) {
-    totalTests++;
-    if (condition) {
-      console.log(`  ✅ PASS: ${testName}`);
-      passedTests++;
-    } else {
-      console.error(`  ❌ FAIL: ${testName}`);
-      throw new Error(`Test assertion failed: ${testName}`);
-    }
-  }
-
-  // --- TEST 1: User findUnique() with integer timestamp (Production D1 exact scenario) ---
-  console.log('[Test Group 1] AuthService.login() / User.findUnique() reproduction');
+  // 1A: Plain column names with integer timestamp
   {
-    const tables = {
-      User: {
-        columns: [
-          'id', 'name', 'email', 'phoneNumber', 'passwordHash',
-          'twoFactorEnabled', 'twoFactorSecret', 'twoFactorTempSecret',
-          'twoFactorRecoveryCodes', 'failedLoginAttempts', 'lockoutUntil', 'createdAt'
-        ],
-        rows: [
-          ['9333003758', 'Sriram Varma', 'bhupathirajusriramvarma@gmail.com', '+1234567890', '$2b$10$hash', 0, null, null, null, 0, null, 1783245388569]
-        ]
-      }
-    };
-    const adapter = new PrismaD1(createMockD1Database(tables));
-    const prisma = new PrismaClient({ adapter });
-
-    const user = await prisma.user.findUnique({
-      where: { email: 'bhupathirajusriramvarma@gmail.com' }
+    const { prisma, cleanup } = createPrismaWithMockD1({
+      user: [{
+        id: 'u1', name: 'Sriram Varma', email: 'test@example.com', phoneNumber: '1234567890',
+        passwordHash: '$2b$10$hash', twoFactorEnabled: 0, twoFactorSecret: null, twoFactorTempSecret: null,
+        twoFactorRecoveryCodes: null, failedLoginAttempts: 0, lockoutUntil: null, createdAt: 1783245388569
+      }]
     });
 
-    assert(user !== null, 'User is returned from findUnique');
-    assert(user.createdAt instanceof Date, 'User.createdAt is an instance of Date');
-    assert(user.createdAt.getTime() === 1783245388569, 'User.createdAt preserves exact millisecond timestamp (1783245388569)');
-    assert(user.createdAt.toISOString() === '2026-07-05T09:56:28.569Z', 'User.createdAt formats to expected ISO string');
-    await prisma.$disconnect();
+    const user = await prisma.user.findUnique({ where: { email: 'test@example.com' } });
+    assert(user !== null, '1A: User returned with plain column names');
+    assert(user.createdAt instanceof Date, '1A: User.createdAt is instance of Date');
+    assert(user.createdAt.getTime() === 1783245388569, '1A: Exact millisecond preserved (1783245388569)');
+    assert(user.createdAt.toISOString() === '2026-07-05T09:56:28.569Z', '1A: Correct ISO string');
+    await cleanup();
   }
 
-  // --- TEST 2: User findUnique() with ISO-8601 string ---
-  console.log('\n[Test Group 2] User.findUnique() with ISO-8601 string in D1');
+  // 1B: Table-qualified column names (User.createdAt) - The exact production failure
   {
-    const tables = {
-      User: {
-        columns: [
-          'id', 'name', 'email', 'phoneNumber', 'passwordHash',
-          'twoFactorEnabled', 'twoFactorSecret', 'twoFactorTempSecret',
-          'twoFactorRecoveryCodes', 'failedLoginAttempts', 'lockoutUntil', 'createdAt'
-        ],
-        rows: [
-          ['9333003758', 'Sriram Varma', 'bhupathirajusriramvarma@gmail.com', '+1234567890', '$2b$10$hash', 0, null, null, null, 0, null, '2026-07-05T09:56:28.569Z']
-        ]
-      }
-    };
-    const adapter = new PrismaD1(createMockD1Database(tables));
-    const prisma = new PrismaClient({ adapter });
-
-    const user = await prisma.user.findUnique({
-      where: { email: 'bhupathirajusriramvarma@gmail.com' }
+    const { prisma, cleanup } = createPrismaWithMockD1({
+      user: [{
+        'User.id': 'u1', 'User.name': 'Sriram Varma', 'User.email': 'test@example.com', 'User.phoneNumber': '1234567890',
+        'User.passwordHash': '$2b$10$hash', 'User.twoFactorEnabled': 0, 'User.twoFactorSecret': null, 'User.twoFactorTempSecret': null,
+        'User.twoFactorRecoveryCodes': null, 'User.failedLoginAttempts': 0, 'User.lockoutUntil': null, 'User.createdAt': 1783245388569
+      }]
     });
 
-    assert(user.createdAt instanceof Date, 'User.createdAt is Date with ISO string');
-    assert(user.createdAt.getTime() === 1783245388569, 'Exact millisecond preserved');
-    await prisma.$disconnect();
+    const user = await prisma.user.findUnique({ where: { email: 'test@example.com' } });
+    assert(user !== null, '1B: User returned with table-qualified column names (User.createdAt)');
+    assert(user.createdAt instanceof Date, '1B: User.createdAt is instance of Date');
+    assert(user.createdAt.getTime() === 1783245388569, '1B: Exact millisecond preserved (1783245388569)');
+    assert(user.createdAt.toISOString() === '2026-07-05T09:56:28.569Z', '1B: Correct ISO string');
+    await cleanup();
   }
 
-  // --- TEST 3: All Models and Date Fields ---
-  console.log('\n[Test Group 3] All Models and DateTime fields validation');
+  // 1C: Schema+Table-qualified column names (main.User.createdAt)
   {
-    const tables = {
-      Expense: {
-        columns: ['id', 'amount', 'category', 'description', 'paymentMethod', 'date', 'createdAt', 'userId', 'transactionType', 'toUserId', 'categoryType'],
-        rows: [['exp_1', 120.5, 'Groceries', 'Supermarket', 'Card', 1782844200000, 1783245599973, '9333003758', 'EXPENSE', null, 'Need']]
-      },
-      Group: {
-        columns: ['id', 'name', 'createdAt', 'ownerId', 'adminIds'],
-        rows: [['grp_1', 'Family Group', 1784802934538, '9333003758', '[]']]
-      },
-      Invitation: {
-        columns: ['id', 'groupId', 'inviteeEmail', 'inviteePhone', 'status', 'createdAt'],
-        rows: [['inv_1', 'grp_1', 'invitee@test.com', null, 'PENDING', 1784802955361]]
-      },
-      Investment: {
-        columns: ['id', 'code', 'name', 'type', 'units', 'buyPrice', 'currentPrice', 'color', 'date', 'userId', 'createdAt', 'updatedAt'],
-        rows: [['asset_1', 'AAPL', 'Apple Inc', 'Stock', 15.0, 150.0, 185.0, '#000', 1786619580000, '9333003758', 1786619726981, 1792522296092]]
-      },
-      InvestmentTransaction: {
-        columns: ['id', 'type', 'units', 'price', 'amount', 'date', 'investmentId', 'userId', 'createdAt'],
-        rows: [['tx_1', 'BUY', 15.0, 150.0, 2250.0, 1786619580000, 'asset_1', '9333003758', 1792515380043]]
-      }
-    };
-    const adapter = new PrismaD1(createMockD1Database(tables));
-    const prisma = new PrismaClient({ adapter });
+    const { prisma, cleanup } = createPrismaWithMockD1({
+      user: [{
+        'main.User.id': 'u1', 'main.User.name': 'Sriram Varma', 'main.User.email': 'test@example.com', 'main.User.phoneNumber': '1234567890',
+        'main.User.passwordHash': '$2b$10$hash', 'main.User.twoFactorEnabled': 0, 'main.User.twoFactorSecret': null, 'main.User.twoFactorTempSecret': null,
+        'main.User.twoFactorRecoveryCodes': null, 'main.User.failedLoginAttempts': 0, 'main.User.lockoutUntil': null, 'main.User.createdAt': 1783245388569
+      }]
+    });
 
-    const expense = await prisma.expense.findFirst();
-    assert(expense.date instanceof Date, 'Expense.date is instance of Date');
-    assert(expense.createdAt instanceof Date, 'Expense.createdAt is instance of Date');
-    assert(expense.date.getTime() === 1782844200000, 'Expense.date millisecond value matches');
-
-    const group = await prisma.group.findFirst();
-    assert(group.createdAt instanceof Date, 'Group.createdAt is instance of Date');
-    assert(group.createdAt.getTime() === 1784802934538, 'Group.createdAt millisecond value matches');
-
-    const invitation = await prisma.invitation.findFirst();
-    assert(invitation.createdAt instanceof Date, 'Invitation.createdAt is instance of Date');
-
-    const investment = await prisma.investment.findFirst();
-    assert(investment.date instanceof Date, 'Investment.date is instance of Date');
-    assert(investment.createdAt instanceof Date, 'Investment.createdAt is instance of Date');
-    assert(investment.updatedAt instanceof Date, 'Investment.updatedAt is instance of Date');
-
-    const tx = await prisma.investmentTransaction.findFirst();
-    assert(tx.date instanceof Date, 'InvestmentTransaction.date is instance of Date');
-    assert(tx.createdAt instanceof Date, 'InvestmentTransaction.createdAt is instance of Date');
-
-    await prisma.$disconnect();
+    const user = await prisma.user.findUnique({ where: { email: 'test@example.com' } });
+    assert(user !== null, '1C: User returned with schema+table qualified names (main.User.createdAt)');
+    assert(user.createdAt instanceof Date, '1C: User.createdAt is instance of Date');
+    assert(user.createdAt.getTime() === 1783245388569, '1C: Exact millisecond preserved');
+    await cleanup();
   }
 
-  // --- TEST 4: Nullable DateTime fields (e.g. lockoutUntil) ---
-  console.log('\n[Test Group 4] Nullable DateTime handling');
+  // 1D: Backtick-qualified column names (`User`.`createdAt`)
   {
-    const tables = {
-      User: {
-        columns: [
-          'id', 'name', 'email', 'phoneNumber', 'passwordHash',
-          'twoFactorEnabled', 'twoFactorSecret', 'twoFactorTempSecret',
-          'twoFactorRecoveryCodes', 'failedLoginAttempts', 'lockoutUntil', 'createdAt'
-        ],
-        rows: [
-          ['u_null', 'Null Lockout', 'null@test.com', '101', 'h', 0, null, null, null, 0, null, 1783245388569],
-          ['u_locked', 'Locked User', 'locked@test.com', '102', 'h', 0, null, null, null, 5, 1783246388569, 1783245388569]
-        ]
-      }
-    };
-    const adapter = new PrismaD1(createMockD1Database(tables));
-    const prisma = new PrismaClient({ adapter });
+    const { prisma, cleanup } = createPrismaWithMockD1({
+      user: [{
+        '`User`.`id`': 'u1', '`User`.`name`': 'Sriram Varma', '`User`.`email`': 'test@example.com', '`User`.`phoneNumber`': '1234567890',
+        '`User`.`passwordHash`': '$2b$10$hash', '`User`.`twoFactorEnabled`': 0, '`User`.`twoFactorSecret`': null, '`User`.`twoFactorTempSecret`': null,
+        '`User`.`twoFactorRecoveryCodes`': null, '`User`.`failedLoginAttempts`': 0, '`User`.`lockoutUntil`': null, '`User`.`createdAt`': 1783245388569
+      }]
+    });
+
+    const user = await prisma.user.findUnique({ where: { email: 'test@example.com' } });
+    assert(user !== null, '1D: User returned with backtick-qualified names (`User`.`createdAt`)');
+    assert(user.createdAt instanceof Date, '1D: User.createdAt is instance of Date');
+    assert(user.createdAt.getTime() === 1783245388569, '1D: Exact millisecond preserved');
+    await cleanup();
+  }
+
+  // --- TEST GROUP 2: ISO-8601 Strings in D1 ---
+  console.log('\n[Test Group 2] ISO-8601 string inputs in Cloudflare D1');
+  {
+    const { prisma, cleanup } = createPrismaWithMockD1({
+      user: [{
+        id: 'u1', name: 'Sriram Varma', email: 'test@example.com', phoneNumber: '1234567890',
+        passwordHash: '$2b$10$hash', twoFactorEnabled: 0, twoFactorSecret: null, twoFactorTempSecret: null,
+        twoFactorRecoveryCodes: null, failedLoginAttempts: 0, lockoutUntil: null, createdAt: '2026-07-05T09:56:28.569Z'
+      }]
+    });
+
+    const user = await prisma.user.findUnique({ where: { email: 'test@example.com' } });
+    assert(user.createdAt instanceof Date, '2: User.createdAt is Date with ISO-8601 string input');
+    assert(user.createdAt.getTime() === 1783245388569, '2: Exact millisecond preserved');
+    await cleanup();
+  }
+
+  // --- TEST GROUP 3: Nullable DateTime fields (lockoutUntil) ---
+  console.log('\n[Test Group 3] Nullable DateTime field handling (lockoutUntil)');
+  {
+    const { prisma, cleanup } = createPrismaWithMockD1({
+      user: [
+        {
+          id: 'u_null', name: 'Null Lockout', email: 'null@test.com', phoneNumber: '101',
+          passwordHash: 'h', twoFactorEnabled: 0, twoFactorSecret: null, twoFactorTempSecret: null,
+          twoFactorRecoveryCodes: null, failedLoginAttempts: 0, lockoutUntil: null, createdAt: 1783245388569
+        },
+        {
+          id: 'u_locked', name: 'Locked User', email: 'locked@test.com', phoneNumber: '102',
+          passwordHash: 'h', twoFactorEnabled: 0, twoFactorSecret: null, twoFactorTempSecret: null,
+          twoFactorRecoveryCodes: null, failedLoginAttempts: 5, lockoutUntil: 1783246388569, createdAt: 1783245388569
+        }
+      ]
+    });
 
     const u1 = await prisma.user.findUnique({ where: { email: 'null@test.com' } });
-    assert(u1.lockoutUntil === null, 'lockoutUntil is null when null in DB');
+    assert(u1.lockoutUntil === null, '3A: lockoutUntil is null when null in DB');
 
     const u2 = await prisma.user.findUnique({ where: { email: 'locked@test.com' } });
-    assert(u2.lockoutUntil instanceof Date, 'lockoutUntil is Date when timestamp present');
-    assert(u2.lockoutUntil.getTime() === 1783246388569, 'lockoutUntil exact timestamp preserved');
-
-    await prisma.$disconnect();
+    assert(u2.lockoutUntil instanceof Date, '3B: lockoutUntil is Date instance when integer timestamp present');
+    assert(u2.lockoutUntil.getTime() === 1783246388569, '3B: lockoutUntil exact timestamp preserved (1783246388569)');
+    await cleanup();
   }
 
-  // --- TEST 5: Round-trip precision and timezone neutrality ---
-  console.log('\n[Test Group 5] Precision and Timezone Neutrality');
+  // --- TEST GROUP 4: All Application Models with DateTime fields ---
+  console.log('\n[Test Group 4] All models with DateTime fields validation');
   {
-    const originalEpoch = 1783245388569;
-    const isoString = new Date(originalEpoch).toISOString();
-    assert(isoString === '2026-07-05T09:56:28.569Z', 'ISO string formatting has millisecond .569');
+    const { prisma, cleanup } = createPrismaWithMockD1({
+      expense: [{
+        id: 'exp_1', amount: 120.5, category: 'Groceries', description: 'Supermarket',
+        paymentMethod: 'Card', date: 1782844200000, createdAt: 1783245599973,
+        userId: 'u1', transactionType: 'EXPENSE', toUserId: null, categoryType: 'Need'
+      }],
+      group: [{
+        id: 'grp_1', name: 'Family Group', createdAt: 1784802934538,
+        ownerId: 'u1', adminIds: '[]'
+      }],
+      invitation: [{
+        id: 'inv_1', groupId: 'grp_1', inviteeEmail: 'inv@test.com', inviteePhone: null,
+        status: 'PENDING', createdAt: 1784802955361
+      }],
+      investment: [{
+        id: 'asset_1', code: 'AAPL', name: 'Apple Inc', type: 'Stock', units: 15.0,
+        buyPrice: 150.0, currentPrice: 185.0, color: '#000', date: 1786619580000,
+        userId: 'u1', createdAt: 1786619726981, updatedAt: 1792522296092
+      }],
+      investmenttransaction: [{
+        id: 'tx_1', type: 'BUY', units: 15.0, price: 150.0, amount: 2250.0,
+        date: 1786619580000, investmentId: 'asset_1', userId: 'u1', createdAt: 1792515380043
+      }]
+    });
 
-    const parsedEpoch = new Date(isoString).getTime();
-    assert(parsedEpoch === originalEpoch, 'Roundtrip from epoch -> ISO -> epoch is lossless');
+    const expense = await prisma.expense.findFirst();
+    assert(expense.date instanceof Date, '4A: Expense.date is instance of Date');
+    assert(expense.createdAt instanceof Date, '4A: Expense.createdAt is instance of Date');
+    assert(expense.date.getTime() === 1782844200000, '4A: Expense.date millisecond value matches');
+
+    const group = await prisma.group.findFirst();
+    assert(group.createdAt instanceof Date, '4B: Group.createdAt is instance of Date');
+    assert(group.createdAt.getTime() === 1784802934538, '4B: Group.createdAt millisecond value matches');
+
+    const invitation = await prisma.invitation.findFirst();
+    assert(invitation.createdAt instanceof Date, '4C: Invitation.createdAt is instance of Date');
+
+    const investment = await prisma.investment.findFirst();
+    assert(investment.date instanceof Date, '4D: Investment.date is instance of Date');
+    assert(investment.createdAt instanceof Date, '4D: Investment.createdAt is instance of Date');
+    assert(investment.updatedAt instanceof Date, '4D: Investment.updatedAt is instance of Date');
+
+    const tx = await prisma.investmentTransaction.findFirst();
+    assert(tx.date instanceof Date, '4E: InvestmentTransaction.date is instance of Date');
+    assert(tx.createdAt instanceof Date, '4E: InvestmentTransaction.createdAt is instance of Date');
+
+    await cleanup();
+  }
+
+  // --- TEST GROUP 5: Roundtrip Precision ---
+  console.log('\n[Test Group 5] Roundtrip Bit-for-bit Precision');
+  {
+    const epoch = 1783245388569;
+    const iso = new Date(epoch).toISOString();
+    assert(iso === '2026-07-05T09:56:28.569Z', '5A: ISO-8601 millisecond formatting');
+    assert(new Date(iso).getTime() === epoch, '5B: Lossless roundtrip epoch -> ISO -> epoch');
   }
 
   console.log('\n================================================================');
@@ -288,7 +306,7 @@ async function runTestSuite() {
   console.log('================================================================\n');
 }
 
-runTestSuite().catch((e) => {
-  console.error('\nFATAL TEST FAILURE:', e);
+runTestSuite().catch((err) => {
+  console.error('\nFATAL TEST FAILURE:', err);
   process.exit(1);
 });
