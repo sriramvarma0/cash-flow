@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, ValidateNested } from 'class-validator';
+import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { CreateExpenseDto } from './create-expense.dto';
 
 export class CreateExpensesBulkDto {
@@ -7,4 +7,8 @@ export class CreateExpensesBulkDto {
   @ValidateNested({ each: true })
   @Type(() => CreateExpenseDto)
   expenses!: CreateExpenseDto[];
+
+  @IsOptional()
+  @IsString()
+  importId?: string;
 }

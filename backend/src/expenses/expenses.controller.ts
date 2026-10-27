@@ -18,9 +18,23 @@ export class ExpensesController {
     @Query('tag') tag?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
-    @Query('categoryType') categoryType?: string
+    @Query('categoryType') categoryType?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('take') take?: string
   ) {
-    return this.expensesService.findAll(user.sub, { category, tag, from, to, categoryType });
+    return this.expensesService.findAll(user.sub, {
+      category,
+      tag,
+      from,
+      to,
+      categoryType,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      skip: skip ? parseInt(skip, 10) : undefined,
+      take: take ? parseInt(take, 10) : undefined
+    });
   }
 
   @Post()

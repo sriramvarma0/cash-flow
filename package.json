@@ -24,7 +24,8 @@
     "d1:migrate:datetime": "node scripts/d1-migrate-datetime.js",
     "d1:migrate:datetime:dry": "node scripts/d1-migrate-datetime.js --dry-run",
     "d1:migrate:datetime:rollback": "node scripts/d1-migrate-datetime.js --rollback",
-    "test:datetime": "node scripts/test-datetime-conversion.js"
+    "test:datetime": "node scripts/test-datetime-conversion.js",
+    "test": "npm run test --workspace backend"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",

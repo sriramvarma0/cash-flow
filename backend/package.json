@@ -12,7 +12,8 @@
     "db:backup": "node scripts/backup-db.cjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "npm run db:backup && prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "test": "ts-node scripts/test-bulk-import-and-expenses.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.2",

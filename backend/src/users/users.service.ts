@@ -155,19 +155,48 @@ export class UsersService implements OnModuleInit {
       throw new NotFoundException('User not found');
     }
 
-    const [transactions, investments, investmentTransactions, groups, tags] = await Promise.all([
-      this.prisma.expense.findMany({
-        where: {
-          OR: [
-            { userId },
-            { toUserId: userId }
-          ]
-        },
-        include: {
-          tags: true
-        },
-        orderBy: { date: 'desc' }
-      }),
+    const rawTransactions = await this.prisma.expense.findMany({
+      where: {
+        OR: [
+          { userId },
+          { toUserId: userId }
+        ]
+      },
+      orderBy: { date: 'desc' }
+    });
+
+    const expenseIds = rawTransactions.map((e) => e.id);
+    const tagsByExpenseId = new Map<string, any[]>();
+    for (const id of expenseIds) tagsByExpenseId.set(id, []);
+
+    for (let i = 0; i < expenseIds.length; i += 50) {
+      const chunk = expenseIds.slice(i, i + 50);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT et."A" AS expenseId, t.*
+         FROM "_ExpenseToTag" et
+         JOIN "Tag" t ON et."B" = t."id"
+         WHERE et."A" IN (${placeholders})`,
+        ...chunk
+      );
+      for (const row of rows) {
+        const expId = row.expenseId || row.expenseid || row.A;
+        if (expId) {
+          tagsByExpenseId.get(expId)?.push({
+            id: row.id || row.ID,
+            name: row.name || row.NAME,
+            userId: row.userId || row.userid
+          });
+        }
+      }
+    }
+
+    const transactions = rawTransactions.map((t) => ({
+      ...t,
+      tags: tagsByExpenseId.get(t.id) || []
+    }));
+
+    const [investments, investmentTransactions, groups, tags] = await Promise.all([
       this.prisma.investment.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' }

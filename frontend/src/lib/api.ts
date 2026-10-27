@@ -229,6 +229,7 @@ export async function deleteExpense(id: string) {
 }
 
 export async function createExpensesBulk(payload: {
+  importId?: string;
   expenses: {
     amount: number;
     category?: string;

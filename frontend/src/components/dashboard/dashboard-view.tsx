@@ -445,7 +445,8 @@ My expenses:
         };
       });
 
-      await createExpensesBulk({ expenses: payloadExpenses });
+      const importId = `ai_import_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      await createExpensesBulk({ expenses: payloadExpenses, importId });
 
       const count = payloadExpenses.length;
       setBulkSuccessMessage(`Successfully imported ${count} expense${count > 1 ? 's' : ''}`);
@@ -879,6 +880,28 @@ My expenses:
       .slice(0, 15);
   }, [activeExpenses]);
 
+  // Current month expense metrics specifically for Expense page overview
+  const currentMonthDateRange = useMemo(() => {
+    return getDateFilterRange('current_month');
+  }, []);
+
+  const currentMonthActiveExpenses = useMemo(() => {
+    return filterExpensesByDateRange(activeExpenses, currentMonthDateRange);
+  }, [activeExpenses, currentMonthDateRange]);
+
+  const currentMonthExpenseTotals = useMemo(() => {
+    const total = totalExpenses(currentMonthActiveExpenses);
+    const transfers = currentUser ? transfersSent(currentMonthActiveExpenses, currentUser.id) : 0;
+    const outflow = currentUser ? totalOutflow(currentMonthActiveExpenses, currentUser.id) : total;
+
+    return {
+      total,
+      transfersSent: transfers,
+      outflow,
+      label: currentMonthDateRange.shortLabel
+    };
+  }, [currentMonthActiveExpenses, currentUser, currentMonthDateRange]);
+
   const trendResult = useMemo(() => {
     return generateSpendingTrend(filteredActiveExpenses, timeFilter, dateRange);
   }, [filteredActiveExpenses, timeFilter, dateRange]);
@@ -1097,53 +1120,81 @@ My expenses:
               </p>
             </div>
           ) : (
-            items.map((expense) => (
-              <div
-                key={expense.id}
-                className="flex items-center justify-between p-3 rounded-2xl bg-white border border-ink-100/60 hover:border-ink-200 transition-all text-left"
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
-                  <div className="w-10 h-10 rounded-xl bg-ink-50 border border-ink-100/80 flex items-center justify-center text-lg shrink-0">
-                    {getCategoryIcon(expense.category, expense.transactionType)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-ink-900 truncate">
-                        {getTransactionTitle(expense, currentUser?.id)}
-                      </p>
-                      {expense.categoryType && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-ink-100/80 text-ink-600 font-medium shrink-0">
-                          {expense.categoryType}
-                        </span>
-                      )}
+            items.map((expense) => {
+              const isExpenseOrIncome = !expense.transactionType || expense.transactionType === 'EXPENSE' || expense.transactionType === 'INCOME';
+              const hasDescription = Boolean(expense.description && expense.description.trim());
+
+              let mainTitle = '';
+              let subCategory = '';
+
+              if (isExpenseOrIncome) {
+                if (hasDescription) {
+                  mainTitle = expense.description!.trim();
+                  if (expense.category && expense.category.trim()) {
+                    if (expense.category.trim().toLowerCase() !== expense.description!.trim().toLowerCase()) {
+                      subCategory = expense.category.trim();
+                    }
+                  } else {
+                    subCategory = '⚠️ Uncategorized';
+                  }
+                } else {
+                  mainTitle = getTransactionTitle(expense, currentUser?.id);
+                }
+              } else {
+                mainTitle = getTransactionTitle(expense, currentUser?.id);
+                if (expense.description && expense.description !== expense.category) {
+                  subCategory = expense.description;
+                }
+              }
+
+              return (
+                <div
+                  key={expense.id}
+                  className="flex items-center justify-between p-3 rounded-2xl bg-white border border-ink-100/60 hover:border-ink-200 transition-all text-left"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
+                    <div className="w-10 h-10 rounded-xl bg-ink-50 border border-ink-100/80 flex items-center justify-center text-lg shrink-0">
+                      {getCategoryIcon(expense.category, expense.transactionType)}
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5 text-xxs text-ink-400">
-                      <span>
-                        {new Date(expense.date).toLocaleDateString('en-IN', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
-                      <span>•</span>
-                      <span className="font-medium text-ink-500">{expense.paymentMethod}</span>
-                      {expense.description && expense.description !== expense.category && (
-                        <>
-                          <span>•</span>
-                          <span className="truncate max-w-[140px] italic text-ink-400">
-                            {expense.description}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-ink-900 truncate">
+                          {mainTitle}
+                        </p>
+                        {expense.categoryType && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-ink-100/80 text-ink-600 font-medium shrink-0">
+                            {expense.categoryType}
                           </span>
-                        </>
-                      )}
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 text-xxs text-ink-400">
+                        <span>
+                          {new Date(expense.date).toLocaleDateString('en-IN', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                        <span>•</span>
+                        <span className="font-medium text-ink-500">{expense.paymentMethod}</span>
+                        {subCategory && (
+                          <>
+                            <span>•</span>
+                            <span className="truncate max-w-[140px] font-medium text-ink-500">
+                              {subCategory}
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
+                  <div className="text-right shrink-0 pl-2">
+                    <div className="text-sm font-bold">{getAmountDisplay(expense, currentUser?.id)}</div>
+                  </div>
                 </div>
-                <div className="text-right shrink-0 pl-2">
-                  <div className="text-sm font-bold">{getAmountDisplay(expense, currentUser?.id)}</div>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -1266,10 +1317,73 @@ My expenses:
           />
         )}
 
-        {/* Route Segment 3: Expenses Page (Top: Form + Recent Transactions, Bottom: Full Expense Table) */}
+        {/* Route Segment 3: Expenses Page (Top: Metrics Overview, Form + Recent Activity, Bottom: Full Expense Table) */}
         {pathname === '/expenses' && (
           <div className="space-y-8 animate-in fade-in duration-300">
-            {/* Top Row: Add Form on Left, Recent Transactions on Right */}
+            {/* Top Row: Metrics Overview (Total Expense, Outgoing Transfers, Total Outflow - Current Month) */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-left">
+              <article
+                className="cash-card p-5 bg-gradient-to-br from-rose-100 to-white shadow-sm text-left hover:-translate-y-0.5 transition-all"
+                style={{
+                  backgroundImage: `linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.75)), linear-gradient(135deg, var(--tw-gradient-stops))`
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-ink-500 text-left">Total Expenses</p>
+                    <p className="text-[10px] text-ink-400 font-medium">This Month ({currentMonthExpenseTotals.label})</p>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-semibold border border-rose-200/60">
+                    Direct
+                  </span>
+                </div>
+                <p className="mt-2 text-2xl font-bold tracking-tight text-ink-900 text-left">
+                  {formatCurrency(currentMonthExpenseTotals.total)}
+                </p>
+              </article>
+
+              <article
+                className="cash-card p-5 bg-gradient-to-br from-blue-100 to-white shadow-sm text-left hover:-translate-y-0.5 transition-all"
+                style={{
+                  backgroundImage: `linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.75)), linear-gradient(135deg, var(--tw-gradient-stops))`
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-ink-500 text-left">Outgoing Transfers</p>
+                    <p className="text-[10px] text-ink-400 font-medium">This Month ({currentMonthExpenseTotals.label})</p>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
+                    Sent
+                  </span>
+                </div>
+                <p className="mt-2 text-2xl font-bold tracking-tight text-ink-900 text-left">
+                  {formatCurrency(currentMonthExpenseTotals.transfersSent)}
+                </p>
+              </article>
+
+              <article
+                className="cash-card p-5 bg-gradient-to-br from-amber-100 to-white shadow-sm text-left sm:col-span-2 lg:col-span-1 hover:-translate-y-0.5 transition-all"
+                style={{
+                  backgroundImage: `linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.75)), linear-gradient(135deg, var(--tw-gradient-stops))`
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-ink-500 text-left">Total Outflow</p>
+                    <p className="text-[10px] text-ink-400 font-medium">This Month ({currentMonthExpenseTotals.label})</p>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold border border-amber-200/60">
+                    Combined
+                  </span>
+                </div>
+                <p className="mt-2 text-2xl font-bold tracking-tight text-ink-900 text-left">
+                  {formatCurrency(currentMonthExpenseTotals.outflow)}
+                </p>
+              </article>
+            </div>
+
+            {/* Middle Row: Add Form on Left, Recent Transactions on Right */}
             <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr] items-start">
               {/* Form Card */}
               <div ref={leftFormRef} className="cash-card p-6 shadow-sm">

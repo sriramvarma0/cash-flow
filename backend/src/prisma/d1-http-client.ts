@@ -138,6 +138,52 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
     commonHeaders['Authorization'] = `Bearer ${apiToken}`;
   }
 
+function splitOversizedSelectQuery(
+  sql: string,
+  params: any[],
+  maxChunkSize: number = 50
+): Array<{ sql: string; params: any[] }> | null {
+  if (params.length <= 98) return null;
+  if (!/^\s*SELECT\b/i.test(sql)) return null;
+
+  // Match the IN (...) clause containing ? placeholders
+  const inRegex = /\bIN\s*\(\s*\?\s*(?:,\s*\?\s*)+\)/i;
+  const match = inRegex.exec(sql);
+  if (!match) return null;
+
+  const matchIndex = match.index;
+  const matchStr = match[0];
+  const prefixSql = sql.substring(0, matchIndex);
+  const suffixSql = sql.substring(matchIndex + matchStr.length);
+
+  const prefixCount = (prefixSql.match(/\?/g) || []).length;
+  const inCount = (matchStr.match(/\?/g) || []).length;
+  const suffixCount = (suffixSql.match(/\?/g) || []).length;
+
+  if (prefixCount + inCount + suffixCount !== params.length) {
+    return null;
+  }
+
+  const prefixParams = params.slice(0, prefixCount);
+  const inParams = params.slice(prefixCount, prefixCount + inCount);
+  const suffixParams = params.slice(prefixCount + inCount);
+
+  if (prefixCount + suffixCount + 1 >= 98) return null;
+
+  const effectiveChunkSize = Math.min(maxChunkSize, 98 - (prefixCount + suffixCount));
+  const queries: Array<{ sql: string; params: any[] }> = [];
+
+  for (let i = 0; i < inParams.length; i += effectiveChunkSize) {
+    const chunk = inParams.slice(i, i + effectiveChunkSize);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const chunkSql = `${prefixSql}IN (${placeholders})${suffixSql}`;
+    const chunkParams = [...prefixParams, ...chunk, ...suffixParams];
+    queries.push({ sql: chunkSql, params: chunkParams });
+  }
+
+  return queries;
+}
+
   async function executeSql(sql: string, params: any[] = []): Promise<D1QueryResult> {
     // Intercept PRAGMA foreign_keys because Cloudflare D1 permanently enforces foreign keys
     // and throws SQLITE_AUTH / execution error if toggled.
@@ -146,6 +192,35 @@ export function createD1HttpClient(config: D1HttpConfig): D1Database {
         results: [],
         success: true,
         meta: { changes: 0, last_row_id: 0, duration: 0 }
+      };
+    }
+
+    // Guard against oversized queries with > 98 parameters by chunking SELECT ... IN (...) queries
+    const chunks = splitOversizedSelectQuery(sql, params);
+    if (chunks && chunks.length > 1) {
+      const allResults: any[] = [];
+      let totalChanges = 0;
+      let totalDuration = 0;
+      let lastRowId = 0;
+
+      for (const chunk of chunks) {
+        const subRes = await executeSql(chunk.sql, chunk.params);
+        if (Array.isArray(subRes.results)) {
+          allResults.push(...subRes.results);
+        }
+        totalChanges += subRes.meta.changes || 0;
+        totalDuration += subRes.meta.duration || 0;
+        lastRowId = subRes.meta.last_row_id || lastRowId;
+      }
+
+      return {
+        results: allResults,
+        success: true,
+        meta: {
+          changes: totalChanges,
+          duration: totalDuration,
+          last_row_id: lastRowId
+        }
       };
     }
 
