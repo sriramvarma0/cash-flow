@@ -51,8 +51,10 @@ if (DATABASE_PROVIDER === 'd1') {
 
   console.log(`[supervisor] Cloudflare D1 Target Database: ${databaseId || 'custom-http'}`);
 
-  if (AUTO_MIGRATE) {
-    console.log('[supervisor] Executing Cloudflare D1 migration runner...');
+  // Prevent concurrent migrations across multiple Azure Container App replicas.
+  // Cloudflare D1 migrations are executed centrally in the CI/CD deployment pipeline before rollout.
+  if (process.env.AUTO_MIGRATE === 'true') {
+    console.log('[supervisor] AUTO_MIGRATE=true requested. Executing Cloudflare D1 migration runner...');
     const d1MigrateScript = path.join(ROOT_DIR, 'scripts/d1-migrate.js');
     if (fs.existsSync(d1MigrateScript)) {
       try {
@@ -67,6 +69,8 @@ if (DATABASE_PROVIDER === 'd1') {
     } else {
       console.warn('[supervisor] Warning: scripts/d1-migrate.js not found, skipping migration check.');
     }
+  } else {
+    console.log('[supervisor] Cloudflare D1 migrations are managed centrally in CI/CD pipeline. Skipping container-startup migration.');
   }
 } else if (DATABASE_PROVIDER === 'sqlite') {
   console.log('[supervisor] Local SQLite provider selected.');

@@ -21,6 +21,7 @@
     "db:test": "node scripts/test-db.js",
     "d1:migrate": "node scripts/d1-migrate.js",
     "d1:migrate:dry": "node scripts/d1-migrate.js --dry-run",
+    "d1:migrate:verify": "node scripts/d1-migrate.js --verify",
     "d1:migrate:datetime": "node scripts/d1-migrate-datetime.js",
     "d1:migrate:datetime:dry": "node scripts/d1-migrate-datetime.js --dry-run",
     "d1:migrate:datetime:rollback": "node scripts/d1-migrate-datetime.js --rollback",

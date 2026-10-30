@@ -57,12 +57,16 @@ CREATE TABLE IF NOT EXISTS "Expense" (
     "category" TEXT,
     "description" TEXT,
     "paymentMethod" TEXT NOT NULL DEFAULT 'Card',
+    "paymentAccount" TEXT,
     "date" DATETIME NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "userId" TEXT NOT NULL,
     "transactionType" TEXT NOT NULL DEFAULT 'EXPENSE',
     "toUserId" TEXT,
     "categoryType" TEXT,
+    "isReceivable" BOOLEAN NOT NULL DEFAULT false,
+    "receivableStatus" TEXT DEFAULT 'OUTSTANDING',
+    "reimbursedAmount" REAL DEFAULT 0,
     CONSTRAINT "Expense_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Expense_toUserId_fkey" FOREIGN KEY ("toUserId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
@@ -149,6 +153,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "Tag_name_userId_key" ON "Tag"("name", "userId
 CREATE INDEX IF NOT EXISTS "Expense_userId_date_idx" ON "Expense"("userId", "date");
 CREATE INDEX IF NOT EXISTS "Expense_userId_category_idx" ON "Expense"("userId", "category");
 CREATE INDEX IF NOT EXISTS "Expense_userId_categoryType_idx" ON "Expense"("userId", "categoryType");
+CREATE INDEX IF NOT EXISTS "Expense_userId_transactionType_idx" ON "Expense"("userId", "transactionType");
+CREATE INDEX IF NOT EXISTS "Expense_userId_isReceivable_idx" ON "Expense"("userId", "isReceivable");
 
 -- Investment Indexes
 CREATE INDEX IF NOT EXISTS "Investment_userId_idx" ON "Investment"("userId");

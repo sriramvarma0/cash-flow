@@ -63,6 +63,32 @@ jobs:
       - name: Build Verification (Frontend & Backend)
         run: npm run build
 
+      - name: Apply Pending Cloudflare D1 Production Migrations
+        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID || vars.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CF_API_TOKEN || secrets.CLOUDFLARE_TOKEN }}
+          CLOUDFLARE_D1_HTTP_URL: ${{ secrets.CLOUDFLARE_D1_HTTP_URL || vars.CLOUDFLARE_D1_HTTP_URL }}
+        run: |
+          echo "===================================================="
+          echo "Checking & Applying Cloudflare D1 Migrations..."
+          echo "===================================================="
+          node scripts/d1-migrate.js
+
+      - name: Verify Cloudflare D1 Migration Success
+        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID || vars.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CF_API_TOKEN || secrets.CLOUDFLARE_TOKEN }}
+          CLOUDFLARE_D1_HTTP_URL: ${{ secrets.CLOUDFLARE_D1_HTTP_URL || vars.CLOUDFLARE_D1_HTTP_URL }}
+        run: |
+          echo "===================================================="
+          echo "Verifying Zero Pending Migrations in Cloudflare D1..."
+          echo "===================================================="
+          node scripts/d1-migrate.js --verify
+
   docker-publish:
     name: 2. Build & Push Unified Image to Docker Hub
     runs-on: ubuntu-latest
