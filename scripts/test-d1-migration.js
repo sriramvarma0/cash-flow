@@ -146,7 +146,7 @@ async function main() {
   // 1. Seed simulated existing production database state:
   // - Tables exist: User, Expense, Group, Tag, Investment (WITHOUT paymentAccount, isReceivable)
   // - Real user records and expense records exist (live data)
-  // - NO _cf_d1_migrations table exists initially (simulating pre-migration production state)
+  // - NO d1_migrations table exists initially (simulating pre-migration production state)
   console.log('[Test Setup] Initializing simulated production D1 database with live records...');
   runSqlOnTempDb(`
     CREATE TABLE "User" (
@@ -279,11 +279,25 @@ async function main() {
     );
 
     try {
-      // Step A: Should detect 1 pending migration and apply it
-      console.log('Applying newly created test migration...');
+      // Step A: Seed _prisma_migrations with this migration name to simulate a local/ORM dump.
+      // D1 migration engine MUST ignore _prisma_migrations and still execute it on D1!
+      runSqlOnTempDb(`
+        CREATE TABLE IF NOT EXISTS _prisma_migrations (
+          id TEXT PRIMARY KEY,
+          checksum TEXT,
+          finished_at DATETIME,
+          migration_name TEXT,
+          applied_steps_count INTEGER
+        );
+        INSERT OR REPLACE INTO _prisma_migrations (id, checksum, finished_at, migration_name, applied_steps_count)
+        VALUES ('dummy-uuid', 'dummy-sum', CURRENT_TIMESTAMP, '20261031999999_test_verify_apply_once', 1);
+      `);
+
+      // Step B: Should detect 1 pending migration in d1_migrations and apply it
+      console.log('Applying newly created test migration (ignoring existing _prisma_migrations record)...');
       const run3A = await runMigrationProcess([], testEnv);
       assert(run3A.status === 0, 'Test 3A: Applied new migration with exit code 0');
-      assert(run3A.stdout.includes('20261031999999_test_verify_apply_once'), 'Test 3A: Applied 20261031999999_test_verify_apply_once');
+      assert(run3A.stdout.includes('20261031999999_test_verify_apply_once'), 'Test 3A: Applied 20261031999999_test_verify_apply_once despite presence in _prisma_migrations');
 
       const checkCanary = runSqlOnTempDb(`SELECT name FROM sqlite_master WHERE type='table' AND name='_test_migration_canary'`);
       assert(checkCanary.results?.length === 1, 'Test 3A: Canary table was created in database');
@@ -299,7 +313,7 @@ async function main() {
       fs.rmSync(testMigDir, { recursive: true, force: true });
       // Remove canary table from temp db
       runSqlOnTempDb(`DROP TABLE IF EXISTS "_test_migration_canary";`);
-      runSqlOnTempDb(`DELETE FROM _cf_d1_migrations WHERE migration_name='20261031999999_test_verify_apply_once';`);
+      runSqlOnTempDb(`DELETE FROM d1_migrations WHERE name='20261031999999_test_verify_apply_once';`);
     }
 
     // ------------------------------------------------------------------
@@ -326,7 +340,7 @@ async function main() {
     } finally {
       fs.rmSync(testInterruptedDir, { recursive: true, force: true });
       runSqlOnTempDb(`DROP INDEX IF EXISTS "idx_test_partial";`);
-      runSqlOnTempDb(`DELETE FROM _cf_d1_migrations WHERE migration_name='20261031999998_test_interrupted_run';`);
+      runSqlOnTempDb(`DELETE FROM d1_migrations WHERE name='20261031999998_test_interrupted_run';`);
     }
 
     // ------------------------------------------------------------------
@@ -335,7 +349,7 @@ async function main() {
     console.log('\n[Test 5] Verifying schema inconsistency detection stops deployment...');
     // Drop one baseline table to simulate an inconsistent/corrupt schema
     runSqlOnTempDb(`DROP TABLE "Investment";`);
-    runSqlOnTempDb(`DELETE FROM _cf_d1_migrations;`); // reset tracking to force baseline inspection
+    runSqlOnTempDb(`DELETE FROM d1_migrations;`); // reset tracking to force baseline inspection
 
     const run5 = await runMigrationProcess([], testEnv);
     const output5 = run5.stdout + run5.stderr;

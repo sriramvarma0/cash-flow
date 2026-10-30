@@ -7,8 +7,8 @@
  * directly to a remote Cloudflare D1 database via Cloudflare REST API.
  * 
  * Key Safety Guarantees:
- * 1. Checks existing migration history across `_cf_d1_migrations`, `_prisma_migrations`,
- *    and `d1_migrations` to ensure previously applied migrations NEVER execute again.
+ * 1. Checks existing migration history across `d1_migrations`
+ *    to ensure previously applied migrations NEVER execute again.
  * 2. Baselines existing production databases that were initialized via schema import
  *    without re-executing initial migrations or altering live tables.
  * 3. Never drops, recreates, truncates, or overwrites existing production tables.
@@ -25,20 +25,34 @@ const MIGRATIONS_DIR = fs.existsSync(path.join(ROOT_DIR, 'backend/prisma/migrati
   ? path.join(ROOT_DIR, 'backend/prisma/migrations')
   : path.join(ROOT_DIR, 'prisma/migrations');
 
-const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID;
-const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-const httpUrl = process.env.CLOUDFLARE_D1_HTTP_URL;
+const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID;
+const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID || process.env.CLOUDFLARE_DATABASE_ID || process.env.D1_DATABASE_ID;
+const apiToken = process.env.CLOUDFLARE_API_TOKEN || process.env.CF_API_TOKEN || process.env.CLOUDFLARE_TOKEN;
+const httpUrl = process.env.CLOUDFLARE_D1_HTTP_URL || process.env.D1_HTTP_URL;
 
 const isDryRun = process.argv.includes('--dry-run');
 const isVerify = process.argv.includes('--verify');
 const isOptional = process.argv.includes('--optional') || process.argv.includes('--skip-if-missing');
+const isDiagnose = process.argv.includes('--diagnose');
 
 console.log('====================================================');
 console.log('   CashFlow Cloudflare D1 Migration Engine');
 console.log('====================================================');
 if (isDryRun) console.log('Mode: DRY RUN (Inspection Only)');
 if (isVerify) console.log('Mode: VERIFY (Assert Zero Pending Migrations)');
+if (isDiagnose) console.log('Mode: DIAGNOSE (Connection & Permissions Audit)');
+
+// Safe credential diagnosis - NEVER logs secret values, lengths, or prefixes
+function logSafeDiagnostics() {
+  console.log('[d1-migrate] --- Cloudflare D1 Credentials Diagnostic ---');
+  console.log(`  • CLOUDFLARE_ACCOUNT_ID:     ${accountId ? 'Present' : '❌ MISSING'}`);
+  console.log(`  • CLOUDFLARE_D1_DATABASE_ID: ${databaseId ? 'Present' : '❌ MISSING'}`);
+  console.log(`  • CLOUDFLARE_API_TOKEN:      ${apiToken ? 'Present' : '❌ MISSING'}`);
+  console.log(`  • CLOUDFLARE_D1_HTTP_URL:    ${httpUrl ? 'Custom URL configured' : 'Default (Cloudflare API v4)'}`);
+  console.log('---------------------------------------------------------');
+}
+
+logSafeDiagnostics();
 
 // 1. Validate Credentials
 if (!httpUrl && (!accountId || !databaseId || !apiToken)) {
@@ -46,7 +60,7 @@ if (!httpUrl && (!accountId || !databaseId || !apiToken)) {
     console.log('[d1-migrate] Notice: Cloudflare D1 credentials not provided. Skipping remote migration check.');
     process.exit(0);
   }
-  console.error('[d1-migrate] Error: Missing required Cloudflare D1 credentials.');
+  console.error('[d1-migrate] ❌ Fatal: Missing required Cloudflare D1 credentials.');
   console.error('[d1-migrate] Required environment variables:');
   console.error('  - CLOUDFLARE_ACCOUNT_ID');
   console.error('  - CLOUDFLARE_D1_DATABASE_ID');
@@ -58,7 +72,7 @@ const endpoint =
   httpUrl ||
   `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
 
-async function executeD1Query(sql, params = []) {
+async function executeD1Query(sql, params = [], operationName = 'Query Execution') {
   const headers = {
     'Content-Type': 'application/json'
   };
@@ -66,20 +80,53 @@ async function executeD1Query(sql, params = []) {
     headers['Authorization'] = `Bearer ${apiToken}`;
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ sql, params }),
-    signal: AbortSignal.timeout(30000)
-  });
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ sql, params }),
+      signal: AbortSignal.timeout(30000)
+    });
+  } catch (netErr) {
+    console.error(`\n[d1-migrate] ❌ Network Error during ${operationName}:`, netErr.message);
+    throw new Error(`[${operationName}] Network fetch failed: ${netErr.message}`);
+  }
 
+  const status = response.status;
+  const statusText = response.statusText;
   const body = await response.json().catch(() => ({}));
+
   if (!response.ok || !body.success) {
-    const errorMsg =
-      body.errors?.[0]?.message ||
-      body.messages?.[0]?.message ||
-      `Query failed with status ${response.status}: ${JSON.stringify(body)}`;
-    throw new Error(errorMsg);
+    const cfError = body.errors?.[0] || {};
+    const errorCode = cfError.code || status;
+    const errorMsg = cfError.message || body.messages?.[0]?.message || `Query failed with status ${status}`;
+
+    console.error('\n====================================================');
+    console.error(`[d1-migrate] ❌ Operation Failed: ${operationName}`);
+    console.error('====================================================');
+    console.error(`  • HTTP Status:           ${status} ${statusText}`);
+    console.error(`  • Cloudflare Error Code: ${errorCode}`);
+    console.error(`  • Cloudflare Message:    ${errorMsg}`);
+    console.error(`  • Statement Executed:    ${sql.replace(/\s+/g, ' ').trim().substring(0, 120)}...`);
+
+    if (errorMsg.includes('SQLITE_AUTH') || errorCode === 7500) {
+      console.error('\n  [Diagnosis: SQLITE_AUTH]');
+      console.error('  The query was rejected by Cloudflare D1 SQLite authorizer.');
+      console.error('  This occurs if a query attempts to access reserved tables (e.g. starting with _cf_)');
+      console.error('  or unsupported PRAGMA commands.');
+    } else if (status === 401 || status === 403 || errorCode === 10000 || errorCode === 9109) {
+      console.error('\n  [Diagnosis: Authorization Failure]');
+      console.error('  HTTP 401/403 or Cloudflare Auth Error.');
+      console.error('  Ensure CLOUDFLARE_API_TOKEN is valid and has "Account > D1 > Edit" permissions.');
+      console.error('  Ensure CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_D1_DATABASE_ID match your Cloudflare account.');
+    }
+    console.error('====================================================\n');
+
+    const err = new Error(`[${operationName}] Failed (HTTP ${status}, Code ${errorCode}): ${errorMsg}`);
+    err.code = errorCode;
+    err.status = status;
+    throw err;
   }
 
   return body.result?.[0] || {};
@@ -174,52 +221,60 @@ async function runMigrations() {
   console.log(`[d1-migrate] Target D1 Database: ${databaseId || httpUrl}`);
   console.log(`[d1-migrate] Inspecting migration history and existing schema...`);
 
-  // 1. Ensure primary tracking table exists
-  await executeD1Query(`
-    CREATE TABLE IF NOT EXISTS _cf_d1_migrations (
-      migration_name TEXT PRIMARY KEY,
-      applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      checksum TEXT
-    );
-  `);
+  // 1. Initial Connectivity & Health Check
+  await executeD1Query('SELECT 1 as ping;', [], 'Health Ping (SELECT 1)');
 
-  // 2. Query all existing migration tracking tables
+  // 2. Ensure standard Wrangler D1 tracking table exists (d1_migrations)
+  // Note: D1 reserves table names starting with _cf_. The standard table is d1_migrations.
+  await executeD1Query(`
+    CREATE TABLE IF NOT EXISTS d1_migrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE,
+      applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `, [], 'Ensuring Migration Tracking Table (d1_migrations)');
+
+  // 3. Query all existing migration tracking tables
   const appliedSet = new Set();
 
-  // 2A: Check _cf_d1_migrations
+  // 3A: Check d1_migrations (Wrangler standard)
   try {
-    const res = await executeD1Query(`SELECT migration_name FROM _cf_d1_migrations`);
+    const res = await executeD1Query(
+      `SELECT name as migration_name FROM d1_migrations;`,
+      [],
+      'Querying migration history (d1_migrations)'
+    );
     for (const r of res.results || []) {
       if (r.migration_name) appliedSet.add(r.migration_name);
     }
   } catch (err) {
-    console.warn(`[d1-migrate] Note querying _cf_d1_migrations: ${err.message}`);
+    console.warn(`[d1-migrate] Note querying d1_migrations: ${err.message}`);
   }
 
-  // 2B: Check _prisma_migrations
+  // 3B: Check if _prisma_migrations table exists (for mirror tracking only)
+  // CRITICAL: Records in _prisma_migrations are NEVER used as proof that D1 migrations have executed.
+  // The authoritative ledger for Cloudflare D1 migrations is strictly d1_migrations.
   let hasPrismaMigrationsTable = false;
   try {
-    const res = await executeD1Query(`SELECT migration_name FROM _prisma_migrations WHERE rolled_back_at IS NULL`);
-    hasPrismaMigrationsTable = true;
-    for (const r of res.results || []) {
-      if (r.migration_name) appliedSet.add(r.migration_name);
-    }
+    const res = await executeD1Query(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='_prisma_migrations';`,
+      [],
+      'Checking presence of _prisma_migrations table'
+    );
+    hasPrismaMigrationsTable = (res.results || []).length > 0;
   } catch {}
 
-  // 2C: Check d1_migrations (Wrangler standard)
-  try {
-    const res = await executeD1Query(`SELECT name as migration_name FROM d1_migrations`);
-    for (const r of res.results || []) {
-      if (r.migration_name) appliedSet.add(r.migration_name);
-    }
-  } catch {}
+  console.log(`[d1-migrate] Found ${appliedSet.size} recorded migration(s) in d1_migrations.`);
 
-  console.log(`[d1-migrate] Found ${appliedSet.size} recorded migration(s) across tracking tables.`);
-
-  // 3. Inspect existing schema (tables & columns) to verify production schema state
+  // 4. Inspect existing schema (tables & columns) to verify production schema state
+  // Exclude _cf_% and sqlite_% to prevent triggering D1 internal table authorizer hooks
   const existingTables = new Set();
   try {
-    const res = await executeD1Query(`SELECT name FROM sqlite_master WHERE type='table';`);
+    const res = await executeD1Query(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'sqlite_%';`,
+      [],
+      'Inspecting database schema (sqlite_master)'
+    );
     for (const r of res.results || []) {
       if (r.name && !r.name.startsWith('_cf_') && !r.name.startsWith('sqlite_') && !r.name.startsWith('_prisma_')) {
         existingTables.add(r.name);
@@ -234,7 +289,11 @@ async function runMigrations() {
   for (const tbl of ['User', 'Expense', 'Investment']) {
     if (existingTables.has(tbl)) {
       try {
-        const colRes = await executeD1Query(`PRAGMA table_info("${tbl}");`);
+        const colRes = await executeD1Query(
+          `PRAGMA table_info("${tbl}");`,
+          [],
+          `Inspecting table columns (PRAGMA table_info on ${tbl})`
+        );
         const cols = new Set((colRes.results || []).map((c) => c.name));
         tableColumns.set(tbl, cols);
       } catch (err) {
@@ -255,16 +314,18 @@ async function runMigrations() {
       if (!appliedSet.has(check.name)) {
         const isPresent = check.verify(existingTables, tableColumns);
         if (isPresent) {
-          if (!isDryRun && !isVerify) {
+          if (!isDryRun && !isVerify && !isDiagnose) {
             await executeD1Query(
-              `INSERT OR IGNORE INTO _cf_d1_migrations (migration_name, checksum) VALUES (?, ?);`,
-              [check.name, 'baseline_verified']
+              `INSERT OR IGNORE INTO d1_migrations (name) VALUES (?);`,
+              [check.name],
+              `Baselining historical migration (${check.name})`
             );
             if (hasPrismaMigrationsTable) {
               await executeD1Query(
                 `INSERT OR IGNORE INTO _prisma_migrations (id, checksum, finished_at, migration_name, applied_steps_count)
                  VALUES (?, ?, CURRENT_TIMESTAMP, ?, 1);`,
-                [crypto.randomUUID(), 'baseline_verified', check.name]
+                [crypto.randomUUID(), 'baseline_verified', check.name],
+                `Baselining in _prisma_migrations (${check.name})`
               );
             }
           }
@@ -296,7 +357,7 @@ async function runMigrations() {
     }
   }
 
-  // 4. Discover all migrations in the repository
+  // 5. Discover all migrations in the repository
   if (!fs.existsSync(MIGRATIONS_DIR)) {
     console.error(`[d1-migrate] Fatal: Migrations directory not found at: ${MIGRATIONS_DIR}`);
     process.exit(1);
@@ -312,7 +373,7 @@ async function runMigrations() {
 
   const pendingMigrations = allRepoMigrations.filter((name) => !appliedSet.has(name));
 
-  // 5. Check if all migrations are satisfied
+  // 6. Check if all migrations are satisfied
   if (pendingMigrations.length === 0) {
     console.log('====================================================');
     console.log('[d1-migrate] ✅ Cloudflare D1 database schema is completely up to date!');
@@ -324,6 +385,15 @@ async function runMigrations() {
   console.log(`[d1-migrate] Found ${pendingMigrations.length} pending migration(s) to apply:`);
   for (const name of pendingMigrations) {
     console.log(`  ➔ ${name}`);
+  }
+
+  // If in --diagnose mode, exit cleanly after non-destructive verification
+  if (isDiagnose) {
+    console.log('====================================================');
+    console.log('[d1-migrate] ✅ Diagnosis complete. Authorization and connectivity verified.');
+    console.log(`             Pending migrations discovered: ${pendingMigrations.length}`);
+    console.log('====================================================');
+    return;
   }
 
   // If in --verify mode and pending migrations exist, fail verification!
@@ -339,7 +409,7 @@ async function runMigrations() {
     return;
   }
 
-  // 6. Apply each pending migration in chronological order
+  // 7. Apply each pending migration in chronological order
   for (const migrationName of pendingMigrations) {
     const sqlFilePath = path.join(MIGRATIONS_DIR, migrationName, 'migration.sql');
     if (!fs.existsSync(sqlFilePath)) {
@@ -361,7 +431,11 @@ async function runMigrations() {
       if (addColMatch) {
         const [, tableName, colName] = addColMatch;
         try {
-          const colCheck = await executeD1Query(`PRAGMA table_info("${tableName}");`);
+          const colCheck = await executeD1Query(
+            `PRAGMA table_info("${tableName}");`,
+            [],
+            `Checking column existence (${tableName}.${colName})`
+          );
           const existingCols = new Set((colCheck.results || []).map((c) => c.name));
           if (existingCols.has(colName)) {
             console.log(`  ℹ️ Statement ${i + 1}: Column "${colName}" already exists on "${tableName}". Skipping idempotent ADD COLUMN.`);
@@ -371,7 +445,11 @@ async function runMigrations() {
       }
 
       try {
-        await executeD1Query(stmt);
+        await executeD1Query(
+          stmt,
+          [],
+          `Applying statement ${i + 1}/${statements.length} in ${migrationName}`
+        );
       } catch (stmtErr) {
         const errMsg = stmtErr.message ? stmtErr.message.toLowerCase() : '';
         // If an ADD COLUMN fails because the column already exists (e.g. partial run interruption),
@@ -385,10 +463,11 @@ async function runMigrations() {
       }
     }
 
-    // 7. Record the migration in _cf_d1_migrations (INSERT OR IGNORE for retry safety)
+    // 8. Record the migration in d1_migrations (INSERT OR IGNORE for retry safety)
     await executeD1Query(
-      `INSERT OR IGNORE INTO _cf_d1_migrations (migration_name, checksum) VALUES (?, ?);`,
-      [migrationName, checksum]
+      `INSERT OR IGNORE INTO d1_migrations (name) VALUES (?);`,
+      [migrationName],
+      `Recording completed migration (${migrationName}) in d1_migrations`
     );
 
     // Also record in _prisma_migrations if present
@@ -397,7 +476,8 @@ async function runMigrations() {
         await executeD1Query(
           `INSERT INTO _prisma_migrations (id, checksum, finished_at, migration_name, applied_steps_count)
            VALUES (?, ?, CURRENT_TIMESTAMP, ?, 1);`,
-          [crypto.randomUUID(), checksum, migrationName]
+          [crypto.randomUUID(), checksum, migrationName],
+          `Recording in _prisma_migrations (${migrationName})`
         );
       } catch (pErr) {
         console.warn(`  Notice updating _prisma_migrations: ${pErr.message}`);
