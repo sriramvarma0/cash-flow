@@ -252,8 +252,9 @@ async function runTestSuite() {
     const { prisma, cleanup } = createPrismaWithMockD1({
       expense: [{
         id: 'exp_1', amount: 120.5, category: 'Groceries', description: 'Supermarket',
-        paymentMethod: 'Card', date: 1782844200000, createdAt: 1783245599973,
-        userId: 'u1', transactionType: 'EXPENSE', toUserId: null, categoryType: 'Need'
+        paymentMethod: 'Card', paymentAccount: 'Card', date: 1782844200000, createdAt: 1783245599973,
+        userId: 'u1', transactionType: 'EXPENSE', toUserId: null, categoryType: 'Need',
+        isReceivable: 0, receivableStatus: 'OUTSTANDING', reimbursedAmount: 0
       }],
       group: [{
         id: 'grp_1', name: 'Family Group', createdAt: 1784802934538,
