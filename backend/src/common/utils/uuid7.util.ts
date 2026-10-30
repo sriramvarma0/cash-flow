@@ -58,6 +58,8 @@ export type TransactionTypePrefix =
   | 'TRANSFER'
   | 'TRANSFER_OUT'
   | 'TRANSFER_IN'
+  | 'RECEIVABLE'
+  | 'RECOVERABLE'
   | 'INVESTMENT'
   | 'INVESTMENT_BUY'
   | 'INVESTMENT_SELL'
@@ -72,6 +74,7 @@ export type TransactionTypePrefix =
  * - 'I' for INCOME
  * - 'TE' for Outgoing Transfer ('TRANSFER', 'TRANSFER_OUT')
  * - 'TI' for Incoming Transfer ('TRANSFER_IN')
+ * - 'R' for RECEIVABLE ('RECEIVABLE', 'RECOVERABLE')
  * - 'PB' for Investment BUY ('BUY', 'INVESTMENT_BUY', 'INVESTMENT')
  * - 'PS' for Investment SELL ('SELL', 'INVESTMENT_SELL')
  * - 'A' for ASSET holding ('ASSET', 'HOLDING')
@@ -82,6 +85,7 @@ export function getTransactionPrefix(type?: string | null): string {
   if (normalized === 'INCOME') return 'I';
   if (normalized === 'TRANSFER_IN' || normalized === 'INCOMING_TRANSFER') return 'TI';
   if (normalized === 'TRANSFER' || normalized === 'TRANSFER_OUT' || normalized === 'OUTGOING_TRANSFER') return 'TE';
+  if (normalized === 'RECEIVABLE' || normalized === 'RECOVERABLE') return 'R';
   if (normalized === 'INVESTMENT_SELL' || normalized === 'SELL') return 'PS';
   if (normalized === 'INVESTMENT' || normalized === 'INVESTMENT_BUY' || normalized === 'BUY') return 'PB';
   if (normalized === 'ASSET' || normalized === 'HOLDING') return 'A';

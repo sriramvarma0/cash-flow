@@ -28,7 +28,12 @@ import {
   DateFilterType,
   getDateFilterRange,
   filterExpensesByDateRange,
-  generateSpendingTrend
+  generateSpendingTrend,
+  totalReceivables,
+  outstandingReceivables,
+  settledReceivables,
+  isReceivableExpense,
+  parseDateSafe
 } from '../../lib/finance';
 
 import { DashboardStats } from './components/DashboardStats';
@@ -83,17 +88,22 @@ function formatToDateTimeLocal(d: Date): string {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
-function emptyForm(defaultType = 'EXPENSE') {
+function emptyForm(defaultType = 'EXPENSE', isReceivable = false) {
+  const isRec = isReceivable || defaultType === 'RECEIVABLE';
   return {
     amount: '',
-    category: '',
+    category: isRec ? 'Receivable' : '',
     description: '',
     paymentMethod: 'Card',
+    paymentAccount: '',
     date: getLocalDateTimeString(),
-    transactionType: defaultType,
+    transactionType: defaultType === 'RECEIVABLE' ? 'EXPENSE' : defaultType,
     toUserId: '',
     tags: '',
-    categoryType: ''
+    categoryType: '',
+    isReceivable: isRec,
+    receivableStatus: 'OUTSTANDING',
+    reimbursedAmount: 0
   };
 }
 
@@ -104,6 +114,9 @@ function getTransactionTitle(expense: Expense, currentUserId?: string | null) {
     } else {
       return `Transfer from ${expense.user?.name || 'Unknown'}`;
     }
+  }
+  if (isReceivableExpense(expense)) {
+    return expense.category ? `Receivable: ${expense.category}` : 'Receivable: Lent';
   }
   if (expense.transactionType === 'INCOME') {
     return expense.category ? `Income: ${expense.category}` : 'Income: ⚠️ Uncategorized';
@@ -119,6 +132,34 @@ function getAmountDisplay(expense: Expense, currentUserId?: string | null) {
   if (expense.transactionType === 'INCOME') {
     return <span className="text-emerald-600 font-bold">+{formatted}</span>;
   }
+  if (isReceivableExpense(expense)) {
+    const isSettled = expense.receivableStatus === 'SETTLED';
+    const isPartial = expense.receivableStatus === 'PARTIALLY_SETTLED';
+    const netAmount = Math.max(0, expense.amount - (expense.reimbursedAmount || 0));
+
+    if (isSettled) {
+      return (
+        <span className="inline-flex flex-col items-end">
+          <span className="line-through text-ink-400 font-medium">{formatted}</span>
+          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Settled (₹0 net)</span>
+        </span>
+      );
+    }
+    if (isPartial) {
+      return (
+        <span className="inline-flex flex-col items-end">
+          <span className="text-amber-600 font-bold">-{formatCurrency(netAmount)}</span>
+          <span className="text-[10px] text-ink-400 line-through">Orig: {formatted}</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex flex-col items-end">
+        <span className="text-amber-700 font-bold">-{formatted}</span>
+        <span className="text-[10px] text-amber-600 font-medium">Outstanding</span>
+      </span>
+    );
+  }
   if (expense.transactionType === 'TRANSFER') {
     if (expense.userId === currentUserId) {
       return <span className="text-amber-500 font-semibold">-{formatted}</span>;
@@ -132,12 +173,14 @@ function getAmountDisplay(expense: Expense, currentUserId?: string | null) {
   return <span className="text-red-600 font-bold">-{formatted}</span>;
 }
 
-function getCategoryIcon(category?: string | null, transactionType?: string | null) {
+function getCategoryIcon(category?: string | null, transactionType?: string | null, isReceivable?: boolean | null) {
   if (transactionType === 'TRANSFER') return '🔄';
+  if (isReceivable || transactionType === 'RECEIVABLE') return '🤝';
   if (transactionType === 'INCOME') return '💰';
   if (transactionType === 'INVESTMENT') return '📈';
   if (!category || category.trim() === '' || category.toLowerCase() === 'uncategorized') return '⚠️';
   const cat = (category || '').toLowerCase();
+  if (cat.includes('receiv') || cat.includes('lent') || cat.includes('loan')) return '🤝';
   if (cat.includes('groc') || cat.includes('food') || cat.includes('rest') || cat.includes('bev') || cat.includes('eat') || cat.includes('dining')) return '🍔';
   if (cat.includes('fuel') || cat.includes('petrol') || cat.includes('diesel') || cat.includes('gas')) return '⛽';
   if (cat.includes('shop') || cat.includes('cloth') || cat.includes('amazon') || cat.includes('store') || cat.includes('mall')) return '🛍️';
@@ -179,6 +222,7 @@ export function DashboardView() {
   const [toFilter, setToFilter] = useState('');
   const [categoryTypeFilter, setCategoryTypeFilter] = useState('');
   const [form, setForm] = useState(emptyForm());
+  const [expenseMainTab, setExpenseMainTab] = useState<'GENERAL' | 'RECEIVABLES'>('GENERAL');
 
   // Dashboard Management States
   const [timeFilter, setTimeFilter] = useState<DateFilterType>('current_month');
@@ -212,7 +256,11 @@ export function DashboardView() {
     setSuccessData(null);
     setIsQuickOpen(false);
     setShowCustomInput(false);
-    setForm(emptyForm(pathname === '/income' ? 'INCOME' : 'EXPENSE'));
+    if (pathname === '/income') {
+      setForm(emptyForm('INCOME'));
+    } else {
+      setForm(emptyForm('EXPENSE', expenseMainTab === 'RECEIVABLES'));
+    }
     setEditingId(null);
   };
 
@@ -695,6 +743,8 @@ My expenses:
     const defaults =
       form.transactionType === 'INCOME'
         ? ['Salary', 'Freelance', 'Investment', 'Other']
+        : form.transactionType === 'RECEIVABLE'
+        ? ['Receivable', 'Loan / Lent', 'Shared Bill', 'Advance', 'Family & Friends', 'Other']
         : ['Grocery', 'Fuel', 'Food & Beverage', 'Shopping', 'Entertainment', 'Utilities', 'Other'];
 
     const existing = expenses
@@ -803,7 +853,8 @@ My expenses:
         (e) =>
           (e.description && e.description.toLowerCase().includes(searchQuery)) ||
           (e.category && e.category.toLowerCase().includes(searchQuery)) ||
-          (e.paymentMethod && e.paymentMethod.toLowerCase().includes(searchQuery))
+          (e.paymentMethod && e.paymentMethod.toLowerCase().includes(searchQuery)) ||
+          (e.paymentAccount && e.paymentAccount.toLowerCase().includes(searchQuery))
       );
     }
 
@@ -817,12 +868,20 @@ My expenses:
         list = list.filter((e) => e.tags && e.tags.some((t) => t.name.includes(tagFilter)));
       }
       if (fromFilter) {
-        const fromDate = new Date(fromFilter);
-        list = list.filter((e) => new Date(e.date) >= fromDate);
+        const fromDate = parseDateSafe(fromFilter);
+        fromDate.setHours(0, 0, 0, 0);
+        list = list.filter((e) => {
+          const d = parseDateSafe(e.date);
+          return !isNaN(d.getTime()) && d >= fromDate;
+        });
       }
       if (toFilter) {
-        const toDate = new Date(toFilter);
-        list = list.filter((e) => new Date(e.date) <= toDate);
+        const toDate = parseDateSafe(toFilter);
+        toDate.setHours(23, 59, 59, 999);
+        list = list.filter((e) => {
+          const d = parseDateSafe(e.date);
+          return !isNaN(d.getTime()) && d <= toDate;
+        });
       }
       if (categoryTypeFilter) {
         list = list.filter((e) => e.categoryType === categoryTypeFilter);
@@ -841,7 +900,7 @@ My expenses:
       (left, right) => new Date(right.date).getTime() - new Date(left.date).getTime()
     );
     const recent = sorted.slice(0, 5);
-    const expenseTransactions = sorted.filter((e) => !e.transactionType || e.transactionType === 'EXPENSE');
+    const expenseTransactions = sorted.filter((e) => !e.transactionType || e.transactionType === 'EXPENSE' || e.transactionType === 'RECEIVABLE');
     const incomeTransactions = sorted.filter((e) => e.transactionType === 'INCOME');
 
     const expensesTotal = totalExpenses(filteredActiveExpenses);
@@ -868,7 +927,7 @@ My expenses:
   // Overall recent expenses & income irrespective of bottom table date filter
   const recentExpenses = useMemo(() => {
     return activeExpenses
-      .filter((e) => !e.transactionType || e.transactionType === 'EXPENSE')
+      .filter((e) => !e.transactionType || e.transactionType === 'EXPENSE' || e.transactionType === 'RECEIVABLE')
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 15);
   }, [activeExpenses]);
@@ -902,6 +961,22 @@ My expenses:
     };
   }, [currentMonthActiveExpenses, currentUser, currentMonthDateRange]);
 
+  const receivableOverviewTotals = useMemo(() => {
+    return {
+      outstanding: outstandingReceivables(activeExpenses),
+      settled: settledReceivables(activeExpenses),
+      total: totalReceivables(activeExpenses)
+    };
+  }, [activeExpenses]);
+
+  const generalExpenseCount = useMemo(() => {
+    return currentMonthActiveExpenses.filter((e) => (!e.transactionType || e.transactionType === 'EXPENSE') && !isReceivableExpense(e)).length;
+  }, [currentMonthActiveExpenses]);
+
+  const receivablesCount = useMemo(() => {
+    return activeExpenses.filter(isReceivableExpense).length;
+  }, [activeExpenses]);
+
   const trendResult = useMemo(() => {
     return generateSpendingTrend(filteredActiveExpenses, timeFilter, dateRange);
   }, [filteredActiveExpenses, timeFilter, dateRange]);
@@ -912,19 +987,26 @@ My expenses:
     setError('');
 
     try {
+      const isReceivable = Boolean(form.isReceivable || form.transactionType === 'RECEIVABLE');
+      const transactionType = form.transactionType === 'RECEIVABLE' ? 'EXPENSE' : (form.transactionType || 'EXPENSE');
+
       const payload = {
         amount: Number(form.amount),
-        category: form.transactionType === 'TRANSFER' ? 'Transfer' : (form.category?.trim() || ''),
+        category: transactionType === 'TRANSFER' ? 'Transfer' : (form.category?.trim() || ''),
         description: form.description,
         paymentMethod: form.paymentMethod,
+        paymentAccount: form.paymentAccount?.trim() || undefined,
         date: (() => {
           const parsed = new Date(form.date);
           return isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
         })(),
-        transactionType: (form.transactionType || 'EXPENSE') as 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT',
-        toUserId: form.transactionType === 'TRANSFER' ? form.toUserId || undefined : undefined,
+        transactionType: transactionType as 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT',
+        toUserId: transactionType === 'TRANSFER' ? form.toUserId || undefined : undefined,
         categoryType: form.categoryType || undefined,
-        tags: form.tags
+        isReceivable,
+        receivableStatus: isReceivable ? ((form.receivableStatus as any) || 'OUTSTANDING') : undefined,
+        reimbursedAmount: isReceivable ? (Number(form.reimbursedAmount) || 0) : undefined,
+        tags: (form.tags || '')
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean)
@@ -941,7 +1023,7 @@ My expenses:
         amount: payload.amount,
         description: payload.description,
         category: payload.category,
-        transactionType: payload.transactionType,
+        transactionType: isReceivable ? 'RECEIVABLE' : payload.transactionType,
         date: payload.date
       });
 
@@ -1002,18 +1084,29 @@ My expenses:
       }
     }
 
+    const isReceivable = isReceivableExpense(expense);
     setEditingId(expense.id);
     setForm({
       amount: String(expense.amount),
       category: expense.category || '',
       description: expense.description ?? '',
       paymentMethod: expense.paymentMethod,
+      paymentAccount: expense.paymentAccount || '',
       date: formatToDateTimeLocal(new Date(expense.date)),
-      transactionType: expense.transactionType || 'EXPENSE',
+      transactionType: expense.transactionType === 'RECEIVABLE' ? 'EXPENSE' : (expense.transactionType || 'EXPENSE'),
       toUserId: expense.toUserId || '',
       tags: expense.tags ? expense.tags.map((t) => t.name).join(', ') : '',
-      categoryType: expense.categoryType || ''
+      categoryType: expense.categoryType || '',
+      isReceivable,
+      receivableStatus: expense.receivableStatus || 'OUTSTANDING',
+      reimbursedAmount: expense.reimbursedAmount ?? 0
     });
+
+    if (isReceivable) {
+      setExpenseMainTab('RECEIVABLES');
+    } else {
+      setExpenseMainTab('GENERAL');
+    }
   }
 
   async function handleDelete(id: string) {
@@ -1177,7 +1270,9 @@ My expenses:
                           })}
                         </span>
                         <span>•</span>
-                        <span className="font-medium text-ink-500">{expense.paymentMethod}</span>
+                        <span className="font-medium text-ink-500">
+                          {expense.paymentMethod}{expense.paymentAccount ? ` (${expense.paymentAccount})` : ''}
+                        </span>
                         {subCategory && (
                           <>
                             <span>•</span>
@@ -1317,70 +1412,115 @@ My expenses:
           />
         )}
 
-        {/* Route Segment 3: Expenses Page (Top: Metrics Overview, Form + Recent Activity, Bottom: Full Expense Table) */}
+        {/* Route Segment 3: Expenses Page (Top: Selector & Metrics Overview, Form + Recent Activity, Bottom: Full Expense Table) */}
         {pathname === '/expenses' && (
-          <div className="space-y-8 animate-in fade-in duration-300">
-            {/* Top Row: Metrics Overview (Total Expense, Outgoing Transfers, Total Outflow - Current Month) */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-left">
-              <article
-                className="cash-card p-5 bg-gradient-to-br from-rose-100 to-white shadow-sm text-left hover:-translate-y-0.5 transition-all"
-                style={{
-                  backgroundImage: `linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.75)), linear-gradient(135deg, var(--tw-gradient-stops))`
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-ink-500 text-left">Total Expenses</p>
-                    <p className="text-[10px] text-ink-400 font-medium">This Month ({currentMonthExpenseTotals.label})</p>
-                  </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-semibold border border-rose-200/60">
-                    Direct
+          <div className="space-y-6 animate-in fade-in duration-300">
+            {/* Top Bar: Tab Selector on Left, Compact Total Amount Cards on Right (Same size & style as the toggle!) */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex items-center p-0.5 bg-ink-100/80 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExpenseMainTab('GENERAL');
+                    if (!editingId) {
+                      setForm(emptyForm('EXPENSE', false));
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    expenseMainTab === 'GENERAL'
+                      ? 'bg-white text-ink-900 shadow-2xs'
+                      : 'text-ink-600 hover:text-ink-900 hover:bg-white/40'
+                  }`}
+                >
+                  <span>💳 General Expenses</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                      expenseMainTab === 'GENERAL'
+                        ? 'bg-brand-100 text-brand-800'
+                        : 'bg-ink-200/60 text-ink-600'
+                    }`}
+                  >
+                    {generalExpenseCount}
                   </span>
-                </div>
-                <p className="mt-2 text-2xl font-bold tracking-tight text-ink-900 text-left">
-                  {formatCurrency(currentMonthExpenseTotals.total)}
-                </p>
-              </article>
+                </button>
 
-              <article
-                className="cash-card p-5 bg-gradient-to-br from-blue-100 to-white shadow-sm text-left hover:-translate-y-0.5 transition-all"
-                style={{
-                  backgroundImage: `linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.75)), linear-gradient(135deg, var(--tw-gradient-stops))`
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-ink-500 text-left">Outgoing Transfers</p>
-                    <p className="text-[10px] text-ink-400 font-medium">This Month ({currentMonthExpenseTotals.label})</p>
-                  </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
-                    Sent
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExpenseMainTab('RECEIVABLES');
+                    if (!editingId) {
+                      setForm(emptyForm('EXPENSE', true));
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    expenseMainTab === 'RECEIVABLES'
+                      ? 'bg-white text-amber-950 shadow-2xs'
+                      : 'text-ink-600 hover:text-ink-900 hover:bg-white/40'
+                  }`}
+                >
+                  <span>🤝 Lending</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                      expenseMainTab === 'RECEIVABLES'
+                        ? 'bg-amber-100 text-amber-900'
+                        : 'bg-ink-200/60 text-ink-600'
+                    }`}
+                  >
+                    {receivablesCount}
                   </span>
-                </div>
-                <p className="mt-2 text-2xl font-bold tracking-tight text-ink-900 text-left">
-                  {formatCurrency(currentMonthExpenseTotals.transfersSent)}
-                </p>
-              </article>
+                </button>
+              </div>
 
-              <article
-                className="cash-card p-5 bg-gradient-to-br from-amber-100 to-white shadow-sm text-left sm:col-span-2 lg:col-span-1 hover:-translate-y-0.5 transition-all"
-                style={{
-                  backgroundImage: `linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.75)), linear-gradient(135deg, var(--tw-gradient-stops))`
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-ink-500 text-left">Total Outflow</p>
-                    <p className="text-[10px] text-ink-400 font-medium">This Month ({currentMonthExpenseTotals.label})</p>
+              {/* Total Amount Cards - Matching the exact size, height & pill style of the toggle */}
+              {expenseMainTab === 'RECEIVABLES' ? (
+                <div className="inline-flex flex-wrap items-center p-0.5 bg-ink-100/80 rounded-xl gap-1 animate-in fade-in duration-200">
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-xs font-semibold shadow-2xs text-amber-950"
+                    title="Outstanding recoverable expenses counting towards net expenses"
+                  >
+                    <span className="text-amber-700/80 font-medium">Pending:</span>
+                    <span className="font-bold text-amber-900">{formatCurrency(receivableOverviewTotals.outstanding)}</span>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold border border-amber-200/60">
-                    Combined
-                  </span>
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-xs font-semibold shadow-2xs text-emerald-950"
+                    title="Settled & reimbursed amount excluded from net expenses"
+                  >
+                    <span className="text-emerald-700/80 font-medium">Settled:</span>
+                    <span className="font-bold text-emerald-700">{formatCurrency(receivableOverviewTotals.settled)}</span>
+                  </div>
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-xs font-semibold shadow-2xs text-blue-950"
+                    title="Total lent principle"
+                  >
+                    <span className="text-blue-700/80 font-medium">Total Lent:</span>
+                    <span className="font-bold text-blue-900">{formatCurrency(receivableOverviewTotals.total)}</span>
+                  </div>
                 </div>
-                <p className="mt-2 text-2xl font-bold tracking-tight text-ink-900 text-left">
-                  {formatCurrency(currentMonthExpenseTotals.outflow)}
-                </p>
-              </article>
+              ) : (
+                <div className="inline-flex flex-wrap items-center p-0.5 bg-ink-100/80 rounded-xl gap-1 animate-in fade-in duration-200">
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-xs font-semibold shadow-2xs text-ink-900"
+                    title={`Total direct expenses for ${currentMonthExpenseTotals.label}`}
+                  >
+                    <span className="text-ink-500 font-medium">Total Expenses:</span>
+                    <span className="font-bold text-rose-700">{formatCurrency(currentMonthExpenseTotals.total)}</span>
+                  </div>
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-xs font-semibold shadow-2xs text-ink-900"
+                    title={`Outgoing transfers for ${currentMonthExpenseTotals.label}`}
+                  >
+                    <span className="text-ink-500 font-medium">Transfers:</span>
+                    <span className="font-bold text-blue-700">{formatCurrency(currentMonthExpenseTotals.transfersSent)}</span>
+                  </div>
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-xs font-semibold shadow-2xs text-ink-900"
+                    title={`Total outflow for ${currentMonthExpenseTotals.label}`}
+                  >
+                    <span className="text-ink-500 font-medium">Total Outflow:</span>
+                    <span className="font-bold text-ink-950">{formatCurrency(currentMonthExpenseTotals.outflow)}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Middle Row: Add Form on Left, Recent Transactions on Right */}
@@ -1391,11 +1531,19 @@ My expenses:
                   <div className="mb-6 flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-ink-100 pb-4">
                     <div>
                       <h2 className="text-2xl font-bold text-ink-900">
-                        {editingId ? 'Edit expense' : 'Add expense'}
+                        {editingId
+                          ? expenseMainTab === 'RECEIVABLES'
+                            ? 'Edit lending transaction'
+                            : 'Edit expense'
+                          : expenseMainTab === 'RECEIVABLES'
+                          ? 'Add lending expense'
+                          : 'Add expense'}
                       </h2>
                       <p className="text-xs text-ink-500 mt-0.5">
                         {editingId
                           ? 'Modify transaction details and click save.'
+                          : expenseMainTab === 'RECEIVABLES'
+                          ? "Record money lent to others or expenses paid on someone's behalf."
                           : 'Keep the data model ready for future encryption and prediction layers.'}
                       </p>
                     </div>
@@ -1412,8 +1560,9 @@ My expenses:
                         <button
                           type="button"
                           onClick={() => {
+                            setForm(emptyForm('EXPENSE', expenseMainTab === 'RECEIVABLES'));
                             setIsQuickOpen(true);
-                            quickAmountRef.current?.focus();
+                            setTimeout(() => quickAmountRef.current?.focus(), 50);
                           }}
                           className="cash-button-secondary py-1.5 px-2.5 text-xs flex items-center gap-1 border-brand-200 bg-brand-50/50 text-brand-700 hover:bg-brand-50 transition-all font-semibold"
                         >
@@ -1447,7 +1596,7 @@ My expenses:
                         type="button"
                         onClick={() => {
                           setEditingId(null);
-                          setForm(emptyForm('EXPENSE'));
+                          setForm(emptyForm('EXPENSE', expenseMainTab === 'RECEIVABLES'));
                         }}
                         className="text-amber-900 hover:underline font-bold"
                       >
@@ -1471,7 +1620,7 @@ My expenses:
                       setShowCustomInput={setShowCustomInput}
                       onCancel={() => {
                         setEditingId(null);
-                        setForm(emptyForm('EXPENSE'));
+                        setForm(emptyForm('EXPENSE', expenseMainTab === 'RECEIVABLES'));
                       }}
                       quickAmountRef={quickAmountRef}
                       isQuickForm={true}
@@ -1494,7 +1643,7 @@ My expenses:
                       setShowCustomInput={setShowCustomInput}
                       onCancel={() => {
                         setEditingId(null);
-                        setForm(emptyForm('EXPENSE'));
+                        setForm(emptyForm('EXPENSE', expenseMainTab === 'RECEIVABLES'));
                       }}
                       pathname={pathname}
                     />
@@ -1540,8 +1689,9 @@ My expenses:
                 onDeleteExpense={handleDelete}
                 onRefresh={loadExpenses}
                 periodLabel={dateRange.label}
-                title="All Expense Transactions"
+                title={expenseMainTab === 'RECEIVABLES' ? 'Receivables (Money Lent)' : 'All Expense Transactions'}
                 transactionType="EXPENSE"
+                initialTab={expenseMainTab === 'RECEIVABLES' ? 'RECEIVABLES' : ''}
               />
             </section>
           </div>
@@ -1594,8 +1744,9 @@ My expenses:
                           <button
                             type="button"
                             onClick={() => {
+                              setForm(emptyForm('INCOME'));
                               setIsQuickOpen(true);
-                              quickAmountRef.current?.focus();
+                              setTimeout(() => quickAmountRef.current?.focus(), 50);
                             }}
                             className="cash-button-secondary py-1.5 px-3 text-xs flex items-center gap-1 border-brand-200 bg-brand-50/50 text-brand-700 hover:bg-brand-50 transition-all font-semibold"
                           >
@@ -1963,7 +2114,11 @@ My expenses:
               onClick={() => {
                 setIsQuickOpen(false);
                 setEditingId(null);
-                setForm(emptyForm(pathname === '/income' ? 'INCOME' : 'EXPENSE'));
+                if (pathname === '/income') {
+                  setForm(emptyForm('INCOME'));
+                } else {
+                  setForm(emptyForm('EXPENSE', expenseMainTab === 'RECEIVABLES'));
+                }
               }}
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1988,7 +2143,11 @@ My expenses:
               onCancel={() => {
                 setIsQuickOpen(false);
                 setEditingId(null);
-                setForm(emptyForm(pathname === '/income' ? 'INCOME' : 'EXPENSE'));
+                if (pathname === '/income') {
+                  setForm(emptyForm('INCOME'));
+                } else {
+                  setForm(emptyForm('EXPENSE', expenseMainTab === 'RECEIVABLES'));
+                }
               }}
               quickAmountRef={quickAmountRef}
               isQuickForm={true}

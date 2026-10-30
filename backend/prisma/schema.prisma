@@ -36,6 +36,7 @@ model Expense {
   category        String?
   description     String?
   paymentMethod   String   @default("Card")
+  paymentAccount  String?
   date            DateTime
   createdAt       DateTime @default(now())
   userId          String
@@ -45,10 +46,15 @@ model Expense {
   toUser          User?    @relation("TransferRecipient", fields: [toUserId], references: [id], onDelete: SetNull)
   tags            Tag[]
   categoryType    String?
+  isReceivable    Boolean  @default(false)
+  receivableStatus String?  @default("OUTSTANDING") // OUTSTANDING, PARTIALLY_SETTLED, SETTLED
+  reimbursedAmount Float?   @default(0)
 
   @@index([userId, date])
   @@index([userId, category])
   @@index([userId, categoryType])
+  @@index([userId, transactionType])
+  @@index([userId, isReceivable])
 }
 
 model Group {

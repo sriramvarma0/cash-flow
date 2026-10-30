@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { DashboardConfig } from '../dashboard-view';
 import { Expense } from '../../../lib/types';
 import { formatCurrency, DateFilterType } from '../../../lib/finance';
@@ -70,6 +70,13 @@ export function DashboardHeader({
 }: DashboardHeaderProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  const currentMonthOptionLabel = useMemo(() => {
+    const now = new Date();
+    const monthShort = now.toLocaleString('en-US', { month: 'short' });
+    const yearShort = String(now.getFullYear()).slice(-2);
+    return `Current Month (${monthShort} ${yearShort})`;
+  }, []);
+
   const renderDashboardSelector = () => {
     return (
       <div className="space-y-8 animate-in fade-in duration-300">
@@ -95,7 +102,7 @@ export function DashboardHeader({
                 className="bg-transparent text-xs font-semibold text-ink-800 focus:outline-hidden cursor-pointer"
                 title="Filter by time period"
               >
-                <option value="current_month">Current Month</option>
+                <option value="current_month">{currentMonthOptionLabel}</option>
                 <option value="calendar_year">Current Calendar Year</option>
                 <option value="financial_year">Current Financial Year</option>
                 <option value="custom">Custom Range...</option>
@@ -492,7 +499,7 @@ export function DashboardHeader({
                 className="bg-transparent text-xs font-semibold text-ink-800 focus:outline-hidden cursor-pointer"
                 title="Filter by time period"
               >
-                <option value="current_month">Current Month</option>
+                <option value="current_month">{currentMonthOptionLabel}</option>
                 <option value="calendar_year">Current Calendar Year</option>
                 <option value="financial_year">Current Financial Year</option>
                 <option value="custom">Custom Range...</option>

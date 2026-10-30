@@ -184,10 +184,13 @@ export async function createExpense(payload: {
   category?: string;
   description?: string;
   paymentMethod?: string;
+  paymentAccount?: string;
   date: string;
-  transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
+  transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT' | 'RECEIVABLE';
   toUserId?: string;
   categoryType?: string;
+  receivableStatus?: 'OUTSTANDING' | 'PARTIALLY_SETTLED' | 'SETTLED';
+  reimbursedAmount?: number;
   tags?: string[];
 }) {
   return parseJson<Expense>(
@@ -206,10 +209,13 @@ export async function updateExpense(
     category: string | null;
     description: string | null;
     paymentMethod: string;
+    paymentAccount: string | null;
     date: string;
-    transactionType: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
+    transactionType: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT' | 'RECEIVABLE';
     toUserId: string | null;
     categoryType: string | null;
+    receivableStatus: 'OUTSTANDING' | 'PARTIALLY_SETTLED' | 'SETTLED' | null;
+    reimbursedAmount: number | null;
     tags: string[];
   }>
 ) {
@@ -236,9 +242,11 @@ export async function createExpensesBulk(payload: {
     description?: string;
     paymentMethod?: string;
     date: string;
-    transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
+    transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT' | 'RECEIVABLE';
     toUserId?: string;
     categoryType?: string;
+    receivableStatus?: 'OUTSTANDING' | 'PARTIALLY_SETTLED' | 'SETTLED';
+    reimbursedAmount?: number;
     tags?: string[];
   }[];
 }) {
@@ -548,6 +556,7 @@ export interface AccountExportPayload {
       categories?: string[];
       tags?: string[];
       dashboards?: any[];
+      quickFormPreferences?: any;
     };
   };
 }

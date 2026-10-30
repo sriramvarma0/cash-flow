@@ -6,7 +6,7 @@ export type SuccessData = {
   amount: number;
   description?: string;
   category?: string;
-  transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
+  transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT' | 'RECEIVABLE';
   date?: string;
 };
 
@@ -210,10 +210,13 @@ export function TransactionSuccessCelebration({
 
   const isIncome = data.transactionType === 'INCOME';
   const isTransfer = data.transactionType === 'TRANSFER';
+  const isReceivable = data.transactionType === 'RECEIVABLE';
   const displayTitle = isIncome
     ? 'Income Recorded'
     : isTransfer
     ? 'Transfer Recorded'
+    : isReceivable
+    ? 'Receivable / Loan Recorded'
     : 'Payment Recorded';
 
   return (

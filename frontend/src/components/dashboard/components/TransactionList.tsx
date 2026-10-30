@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { AuthUser, Expense } from '../../../lib/types';
-import { formatCurrency, getDisplayTrackingId } from '../../../lib/finance';
+import { formatCurrency, getDisplayTrackingId, isReceivableExpense } from '../../../lib/finance';
 
 export type TransactionListProps = {
   displayedExpenses: Expense[];
@@ -21,7 +21,7 @@ export type TransactionListProps = {
   onDeleteExpense: (id: string) => void;
 };
 
-export type TxFilterTab = 'ALL' | 'EXPENSE' | 'INCOME' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'INVESTMENT';
+export type TxFilterTab = 'ALL' | 'EXPENSE' | 'RECEIVABLE' | 'INCOME' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'INVESTMENT';
 
 function getTransactionTitle(expense: Expense, currentUserId?: string) {
   if (expense.transactionType === 'TRANSFER') {
@@ -30,6 +30,9 @@ function getTransactionTitle(expense: Expense, currentUserId?: string) {
     } else {
       return `Transfer from ${expense.user?.name || expense.user?.email || 'Unknown'}`;
     }
+  }
+  if (isReceivableExpense(expense)) {
+    return expense.category ? `Receivable: ${expense.category}` : 'Receivable: Lent';
   }
   if (expense.transactionType === 'INCOME') {
     return expense.category ? `Income: ${expense.category}` : 'Income: ⚠️ Uncategorized';
@@ -44,6 +47,34 @@ function getAmountDisplay(expense: Expense, currentUserId?: string) {
   const formatted = formatCurrency(expense.amount);
   if (expense.transactionType === 'INCOME') {
     return <span className="text-emerald-600 font-bold">+{formatted}</span>;
+  }
+  if (isReceivableExpense(expense)) {
+    const isSettled = expense.receivableStatus === 'SETTLED';
+    const isPartial = expense.receivableStatus === 'PARTIALLY_SETTLED';
+    const netAmount = Math.max(0, expense.amount - (expense.reimbursedAmount || 0));
+
+    if (isSettled) {
+      return (
+        <span className="flex flex-col items-end">
+          <span className="line-through text-ink-400 font-medium text-xs">{formatted}</span>
+          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Settled (₹0 net)</span>
+        </span>
+      );
+    }
+    if (isPartial) {
+      return (
+        <span className="flex flex-col items-end">
+          <span className="text-amber-600 font-bold">-{formatCurrency(netAmount)}</span>
+          <span className="text-[10px] text-ink-400 line-through">Orig: {formatted}</span>
+        </span>
+      );
+    }
+    return (
+      <span className="flex flex-col items-end">
+        <span className="text-amber-700 font-bold">-{formatted}</span>
+        <span className="text-[10px] text-amber-600 font-medium">Outstanding</span>
+      </span>
+    );
   }
   if (expense.transactionType === 'TRANSFER') {
     if (expense.userId === currentUserId) {
@@ -81,7 +112,10 @@ export function TransactionList({
   // Filter based on selected bottom tab
   const listToRender = useMemo(() => {
     if (activeTab === 'EXPENSE') {
-      return displayedExpenses.filter((e) => !e.transactionType || e.transactionType === 'EXPENSE');
+      return displayedExpenses.filter((e) => (!e.transactionType || e.transactionType === 'EXPENSE') && !isReceivableExpense(e));
+    }
+    if (activeTab === 'RECEIVABLE') {
+      return displayedExpenses.filter(isReceivableExpense);
     }
     if (activeTab === 'INCOME') {
       return displayedExpenses.filter((e) => e.transactionType === 'INCOME');
@@ -99,7 +133,8 @@ export function TransactionList({
   }, [displayedExpenses, activeTab, currentUser]);
 
   // Tab counts
-  const expenseCount = useMemo(() => displayedExpenses.filter((e) => !e.transactionType || e.transactionType === 'EXPENSE').length, [displayedExpenses]);
+  const expenseCount = useMemo(() => displayedExpenses.filter((e) => (!e.transactionType || e.transactionType === 'EXPENSE') && !isReceivableExpense(e)).length, [displayedExpenses]);
+  const receivableCount = useMemo(() => displayedExpenses.filter(isReceivableExpense).length, [displayedExpenses]);
   const incomeCount = useMemo(() => displayedExpenses.filter((e) => e.transactionType === 'INCOME').length, [displayedExpenses]);
   const transferOutCount = useMemo(() => displayedExpenses.filter((e) => e.transactionType === 'TRANSFER' && (!currentUser || e.userId === currentUser.id)).length, [displayedExpenses, currentUser]);
   const transferInCount = useMemo(() => displayedExpenses.filter((e) => e.transactionType === 'TRANSFER' && (currentUser && e.toUserId === currentUser.id)).length, [displayedExpenses, currentUser]);
@@ -149,13 +184,42 @@ export function TransactionList({
               onChange={(event) => setToFilter(event.target.value)}
             />
           </div>
-          <button
-            className="cash-button-primary self-start sm:self-auto"
-            type="button"
-            onClick={onApplyFilters}
-          >
-            Apply filters
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date();
+                const y = now.getFullYear();
+                const m = String(now.getMonth() + 1).padStart(2, '0');
+                const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+                setFromFilter(`${y}-${m}-01`);
+                setToFilter(`${y}-${m}-${String(lastDay).padStart(2, '0')}`);
+              }}
+              className="text-xs font-semibold px-2.5 py-2 rounded-xl border border-brand-200 bg-brand-50/70 text-brand-800 hover:bg-brand-100 transition shadow-2xs flex items-center gap-1"
+              title="Set date range to Current Month"
+            >
+              <span>📅 Current Month</span>
+            </button>
+            {(fromFilter || toFilter) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFromFilter('');
+                  setToFilter('');
+                }}
+                className="text-xs font-medium text-ink-500 hover:text-ink-800 underline px-1"
+              >
+                Clear
+              </button>
+            )}
+            <button
+              className="cash-button-primary"
+              type="button"
+              onClick={onApplyFilters}
+            >
+              Apply filters
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -269,6 +333,20 @@ export function TransactionList({
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
                             ↙ Incoming (TI)
                           </span>
+                        ) : isReceivableExpense(expense) ? (
+                          expense.receivableStatus === 'SETTLED' ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
+                              ✅ Settled (R)
+                            </span>
+                          ) : expense.receivableStatus === 'PARTIALLY_SETTLED' ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-100 text-sky-900 border border-sky-300">
+                              🔄 Partial (R)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                              ⏳ Outstanding (R)
+                            </span>
+                          )
                         ) : expense.transactionType === 'INCOME' ? (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
                             Income (I)
@@ -320,7 +398,12 @@ export function TransactionList({
                         )}
                         {!expense.categoryType && <span className="text-ink-400">—</span>}
                       </td>
-                      <td className="px-6 py-4 text-ink-600 whitespace-nowrap">{expense.paymentMethod}</td>
+                      <td className="px-6 py-4 text-ink-600 whitespace-nowrap">
+                        <div>{expense.paymentMethod}</div>
+                        {expense.paymentAccount && (
+                          <div className="text-[11px] text-ink-400 font-normal">{expense.paymentAccount}</div>
+                        )}
+                      </td>
                       <td className="px-6 py-4 font-semibold whitespace-nowrap">
                         {getAmountDisplay(expense, currentUser?.id)}
                       </td>
@@ -384,6 +467,17 @@ export function TransactionList({
                 }`}
               >
                 💳 Expenses (E...) [{expenseCount}]
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('RECEIVABLE')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  activeTab === 'RECEIVABLE'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-white border border-ink-200 text-ink-600 hover:text-amber-700 hover:bg-amber-50/50'
+                }`}
+              >
+                🤝 Receivables (R...) [{receivableCount}]
               </button>
               <button
                 type="button"

@@ -1,4 +1,4 @@
-import { IsDateString, IsNumber, IsOptional, IsString, Min, IsIn, IsArray } from 'class-validator';
+import { IsDateString, IsNumber, IsOptional, IsString, Min, IsIn, IsArray, IsBoolean } from 'class-validator';
 
 export class UpdateExpenseDto {
   @IsOptional()
@@ -19,12 +19,16 @@ export class UpdateExpenseDto {
   paymentMethod?: string;
 
   @IsOptional()
+  @IsString()
+  paymentAccount?: string;
+
+  @IsOptional()
   @IsDateString()
   date?: string;
 
   @IsOptional()
   @IsString()
-  @IsIn(['EXPENSE', 'INCOME', 'TRANSFER'])
+  @IsIn(['EXPENSE', 'INCOME', 'TRANSFER', 'RECEIVABLE'])
   transactionType?: string;
 
   @IsOptional()
@@ -35,6 +39,20 @@ export class UpdateExpenseDto {
   @IsString()
   @IsIn(['ESSENTIALS', 'HIGH_VALUE', 'LIFESTYLE'])
   categoryType?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isReceivable?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['OUTSTANDING', 'PARTIALLY_SETTLED', 'SETTLED'])
+  receivableStatus?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  reimbursedAmount?: number;
 
   @IsOptional()
   @IsArray()

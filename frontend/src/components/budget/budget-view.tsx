@@ -8,7 +8,9 @@ import {
   formatCurrency,
   DateFilterType,
   getDateFilterRange,
-  filterExpensesByDateRange
+  filterExpensesByDateRange,
+  getNetExpenseAmount,
+  isReceivableExpense
 } from '../../lib/finance';
 
 const DEFAULT_BUDGET_CATEGORIES: Omit<CategoryBudget, 'id' | 'createdAt' | 'updatedAt'>[] = [
@@ -152,10 +154,10 @@ export function BudgetView() {
     return getDateFilterRange(timeFilter, customStartDate, customEndDate);
   }, [timeFilter, customStartDate, customEndDate]);
 
-  // Expenses filtered by current period & transaction type EXPENSE
+  // Expenses filtered by current period & transaction type EXPENSE or RECEIVABLE
   const periodExpenses = useMemo(() => {
     const inRange = filterExpensesByDateRange(expenses, activeDateRange);
-    return inRange.filter((e) => !e.transactionType || e.transactionType === 'EXPENSE');
+    return inRange.filter((e) => !e.transactionType || e.transactionType === 'EXPENSE' || isReceivableExpense(e));
   }, [expenses, activeDateRange]);
 
   // Distinct category list from existing expenses
@@ -175,11 +177,12 @@ export function BudgetView() {
     // Map spending per category
     const spentMap: Record<string, { total: number; transactions: Expense[] }> = {};
     periodExpenses.forEach((exp) => {
-      const catKey = (exp.category || 'General & Others').trim().toLowerCase();
+      const catKey = (exp.category || (isReceivableExpense(exp) ? 'Receivable' : 'General & Others')).trim().toLowerCase();
       if (!spentMap[catKey]) {
         spentMap[catKey] = { total: 0, transactions: [] };
       }
-      spentMap[catKey].total += exp.amount;
+      const net = getNetExpenseAmount(exp);
+      spentMap[catKey].total += net;
       spentMap[catKey].transactions.push(exp);
     });
 

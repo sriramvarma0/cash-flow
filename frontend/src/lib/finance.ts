@@ -15,22 +15,74 @@ export function formatCurrency(amount: number) {
   return `${isNegative ? '-' : ''}₹${formattedInteger}.${decimalPart}`;
 }
 
+export function isReceivableExpense(expense: Expense): boolean {
+  if (!expense) return false;
+  return Boolean(
+    expense.isReceivable === true ||
+    expense.transactionType === 'RECEIVABLE' ||
+    expense.id?.startsWith('R')
+  );
+}
+
+/**
+ * Calculates the net expense contribution for a transaction.
+ * - Standard EXPENSE: counts 100% of amount.
+ * - RECEIVABLE:
+ *   - OUTSTANDING (reimbursedAmount = 0): counts 100% of amount.
+ *   - PARTIALLY_SETTLED (0 < reimbursedAmount < amount): counts only unreimbursed amount (amount - reimbursedAmount).
+ *   - SETTLED (reimbursedAmount >= amount): counts 0 (excluded from net expense, history preserved).
+ * - Other types (INCOME, TRANSFER): 0.
+ */
+export function getNetExpenseAmount(expense: Expense): number {
+  if (expense.transactionType === 'INCOME' || expense.transactionType === 'TRANSFER') {
+    return 0;
+  }
+  if (isReceivableExpense(expense)) {
+    const reimbursed = expense.reimbursedAmount ?? 0;
+    return Math.max(0, expense.amount - reimbursed);
+  }
+  return expense.amount;
+}
+
 export function totalExpenses(expenses: Expense[]) {
   return expenses
-    .filter((e) => !e.transactionType || e.transactionType === 'EXPENSE')
-    .reduce((sum, expense) => sum + expense.amount, 0);
+    .filter((e) => !e.transactionType || e.transactionType === 'EXPENSE' || isReceivableExpense(e))
+    .reduce((sum, expense) => sum + getNetExpenseAmount(expense), 0);
+}
+
+export function parseDateSafe(dateInput: string | Date | null | undefined): Date {
+  if (!dateInput) return new Date(NaN);
+  if (dateInput instanceof Date) return dateInput;
+
+  const trimmed = String(dateInput).trim();
+  // Date-only string YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const [y, m, d] = trimmed.split('-').map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0, 0); // Noon local time avoids timezone shift across all timezones
+  }
+
+  // Local datetime string YYYY-MM-DDTHH:mm or YYYY-MM-DDTHH:mm:ss without timezone offset
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) {
+    const [datePart, timePart] = trimmed.split('T');
+    const [y, m, d] = datePart.split('-').map(Number);
+    const [hr, min, sec] = timePart.split(':').map(Number);
+    return new Date(y, m - 1, d, hr, min, sec || 0, 0);
+  }
+
+  return new Date(trimmed);
 }
 
 export function monthlyExpenses(expenses: Expense[], referenceDate = new Date()) {
   return expenses
-    .filter((e) => !e.transactionType || e.transactionType === 'EXPENSE')
+    .filter((e) => !e.transactionType || e.transactionType === 'EXPENSE' || isReceivableExpense(e))
     .reduce((sum, expense) => {
-      const date = new Date(expense.date);
+      const date = parseDateSafe(expense.date);
+      if (isNaN(date.getTime())) return sum;
       const sameMonth =
         date.getFullYear() === referenceDate.getFullYear() &&
         date.getMonth() === referenceDate.getMonth();
 
-      return sameMonth ? sum + expense.amount : sum;
+      return sameMonth ? sum + getNetExpenseAmount(expense) : sum;
     }, 0);
 }
 
@@ -38,17 +90,38 @@ export function categoryBreakdown(expenses: Expense[]) {
   const totals = new Map<string, number>();
 
   const activeExpenses = expenses.filter(
-    (e) => !e.transactionType || e.transactionType === 'EXPENSE'
+    (e) => !e.transactionType || e.transactionType === 'EXPENSE' || isReceivableExpense(e)
   );
 
   for (const expense of activeExpenses) {
-    const category = expense.category || 'Uncategorized';
-    totals.set(category, (totals.get(category) ?? 0) + expense.amount);
+    const netAmount = getNetExpenseAmount(expense);
+    if (netAmount > 0) {
+      const category = expense.category || (isReceivableExpense(expense) ? 'Receivable' : 'Uncategorized');
+      totals.set(category, (totals.get(category) ?? 0) + netAmount);
+    }
   }
 
   return Array.from(totals.entries())
     .map(([name, value]) => ({ name, value }))
     .sort((left, right) => right.value - left.value);
+}
+
+export function totalReceivables(expenses: Expense[]) {
+  return expenses
+    .filter(isReceivableExpense)
+    .reduce((sum, expense) => sum + expense.amount, 0);
+}
+
+export function outstandingReceivables(expenses: Expense[]) {
+  return expenses
+    .filter((e) => isReceivableExpense(e) && e.receivableStatus !== 'SETTLED')
+    .reduce((sum, expense) => sum + Math.max(0, expense.amount - (expense.reimbursedAmount || 0)), 0);
+}
+
+export function settledReceivables(expenses: Expense[]) {
+  return expenses
+    .filter(isReceivableExpense)
+    .reduce((sum, expense) => sum + (expense.reimbursedAmount || 0), 0);
 }
 
 export function totalIncome(expenses: Expense[]) {
@@ -223,7 +296,7 @@ export function filterExpensesByDateRange(
 ): Expense[] {
   return expenses.filter((e) => {
     if (!e.date) return false;
-    const expDate = new Date(e.date);
+    const expDate = parseDateSafe(e.date);
     if (isNaN(expDate.getTime())) return false;
     if (range.start && expDate < range.start) return false;
     if (range.end && expDate > range.end) return false;
@@ -242,8 +315,10 @@ export function generateSpendingTrend(
   range: DateRange,
   referenceDate: Date = new Date()
 ): { data: TrendChartPoint[]; title: string; subtitle: string } {
-  // Only include EXPENSE transactions for spending trends
-  const expenseList = expenses.filter((e) => !e.transactionType || e.transactionType === 'EXPENSE');
+  // Include EXPENSE and RECEIVABLE (using net expense amount) for spending trends
+  const expenseList = expenses.filter(
+    (e) => !e.transactionType || e.transactionType === 'EXPENSE' || isReceivableExpense(e)
+  );
 
   if (filterType === 'current_month') {
     const targetYear = (range.start || referenceDate).getFullYear();
@@ -253,10 +328,11 @@ export function generateSpendingTrend(
 
     const dailyTotals: Record<number, number> = {};
     expenseList.forEach((e) => {
-      const d = new Date(e.date);
+      const d = parseDateSafe(e.date);
+      if (isNaN(d.getTime())) return;
       if (d.getFullYear() === targetYear && d.getMonth() === targetMonth) {
         const day = d.getDate();
-        dailyTotals[day] = (dailyTotals[day] || 0) + e.amount;
+        dailyTotals[day] = (dailyTotals[day] || 0) + getNetExpenseAmount(e);
       }
     });
 
@@ -281,10 +357,11 @@ export function generateSpendingTrend(
     const monthlyTotals: Record<number, number> = {};
 
     expenseList.forEach((e) => {
-      const d = new Date(e.date);
+      const d = parseDateSafe(e.date);
+      if (isNaN(d.getTime())) return;
       if (d.getFullYear() === targetYear) {
         const m = d.getMonth();
-        monthlyTotals[m] = (monthlyTotals[m] || 0) + e.amount;
+        monthlyTotals[m] = (monthlyTotals[m] || 0) + getNetExpenseAmount(e);
       }
     });
 
@@ -321,9 +398,10 @@ export function generateSpendingTrend(
 
     const totals: Record<string, number> = {};
     expenseList.forEach((e) => {
-      const d = new Date(e.date);
+      const d = parseDateSafe(e.date);
+      if (isNaN(d.getTime())) return;
       const key = `${d.getFullYear()}-${d.getMonth()}`;
-      totals[key] = (totals[key] || 0) + e.amount;
+      totals[key] = (totals[key] || 0) + getNetExpenseAmount(e);
     });
 
     const data: TrendChartPoint[] = fyMonths.map((item) => {
@@ -356,9 +434,10 @@ export function generateSpendingTrend(
       const dailyMap: Record<string, number> = {};
 
       expenseList.forEach((e) => {
-        const d = new Date(e.date);
+        const d = parseDateSafe(e.date);
+        if (isNaN(d.getTime())) return;
         const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-        dailyMap[k] = (dailyMap[k] || 0) + e.amount;
+        dailyMap[k] = (dailyMap[k] || 0) + getNetExpenseAmount(e);
       });
 
       while (current <= end) {
@@ -385,7 +464,7 @@ export function generateSpendingTrend(
       expenseList.forEach((e) => {
         const d = new Date(e.date);
         const k = `${d.getFullYear()}-${d.getMonth()}`;
-        monthlyMap[k] = (monthlyMap[k] || 0) + e.amount;
+        monthlyMap[k] = (monthlyMap[k] || 0) + getNetExpenseAmount(e);
       });
 
       while (current <= monthEnd) {
@@ -426,7 +505,7 @@ export function generateSpendingTrend(
   expenseList.forEach((e) => {
     const d = new Date(e.date);
     const k = `${d.getFullYear()}-${d.getMonth()}`;
-    monthlyMap[k] = (monthlyMap[k] || 0) + e.amount;
+    monthlyMap[k] = (monthlyMap[k] || 0) + getNetExpenseAmount(e);
   });
 
   const data: TrendChartPoint[] = [];

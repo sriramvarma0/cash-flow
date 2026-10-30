@@ -21,6 +21,13 @@ import {
   type TwoFactorStatus
 } from '../../../lib/api';
 import { AuthUser } from '../../../lib/types';
+import {
+  getQuickFormPreferences,
+  saveQuickFormPreferences,
+  DEFAULT_QUICK_FORM_PREFERENCES,
+  QUICK_FORM_FIELDS,
+  type QuickFormPreferences
+} from '../../../lib/quick-form-preferences';
 
 interface TagItem {
   name: string;
@@ -59,6 +66,10 @@ export default function SettingsPage() {
   const [currency, setCurrency] = useState('INR');
   const [notifications, setNotifications] = useState(true);
   const [theme, setTheme] = useState('light');
+
+  // Quick Form Preferences state
+  const [quickPrefs, setQuickPrefs] = useState<QuickFormPreferences>(() => getQuickFormPreferences());
+  const [quickPrefsSavedMsg, setQuickPrefsSavedMsg] = useState('');
 
   // Manage Tags state
   const [tags, setTags] = useState<TagItem[]>([]);
@@ -184,7 +195,23 @@ export default function SettingsPage() {
     }
     void loadData();
     setSavedAccounts(getSavedAccounts());
+    setQuickPrefs(getQuickFormPreferences());
   }, []);
+
+  const handleUpdateQuickPref = (key: keyof QuickFormPreferences, value: boolean) => {
+    const updated = { ...quickPrefs, [key]: value };
+    setQuickPrefs(updated);
+    saveQuickFormPreferences({ [key]: value });
+    setQuickPrefsSavedMsg('Preferences saved');
+    setTimeout(() => setQuickPrefsSavedMsg(''), 2500);
+  };
+
+  const handleResetQuickPrefs = () => {
+    setQuickPrefs(DEFAULT_QUICK_FORM_PREFERENCES);
+    saveQuickFormPreferences(DEFAULT_QUICK_FORM_PREFERENCES);
+    setQuickPrefsSavedMsg('Reset to default');
+    setTimeout(() => setQuickPrefsSavedMsg(''), 2500);
+  };
 
   const handleAddTag = (e: React.FormEvent) => {
     e.preventDefault();
@@ -277,7 +304,8 @@ export default function SettingsPage() {
         payload.data.customPreferences = {
           categories: savedCats ? JSON.parse(savedCats) : [],
           tags: savedTags ? JSON.parse(savedTags) : [],
-          dashboards: savedDash ? JSON.parse(savedDash) : []
+          dashboards: savedDash ? JSON.parse(savedDash) : [],
+          quickFormPreferences: getQuickFormPreferences()
         };
       } catch (err) {
         console.warn('Could not bundle local preferences:', err);
@@ -354,6 +382,10 @@ export default function SettingsPage() {
         }
         if (Array.isArray(prefs.dashboards) && prefs.dashboards.length > 0) {
           localStorage.setItem(`cashflow_custom_dashboards_${user.id}`, JSON.stringify(prefs.dashboards));
+        }
+        if (prefs.quickFormPreferences) {
+          saveQuickFormPreferences(prefs.quickFormPreferences);
+          setQuickPrefs(getQuickFormPreferences());
         }
       }
 
@@ -764,6 +796,181 @@ export default function SettingsPage() {
                     checked={notifications}
                     onChange={(e) => setNotifications(e.target.checked)}
                   />
+                </div>
+              </div>
+
+              {/* Quick Entry Form Preferences */}
+              <div className="pt-6 border-t border-ink-100 space-y-4 text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-base font-bold text-ink-900 flex items-center gap-2">
+                      <span>⚡ Quick Entry Form Customization</span>
+                      <span className="text-xs bg-brand-100 text-brand-800 px-2 py-0.5 rounded-full font-bold">
+                        User Preferences
+                      </span>
+                      {quickPrefsSavedMsg && (
+                        <span className="text-xs bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-semibold animate-in fade-in duration-200">
+                          ✓ {quickPrefsSavedMsg}
+                        </span>
+                      )}
+                    </h4>
+                    <p className="text-xs text-ink-500 mt-0.5">
+                      Configure which fields appear in your Quick Entry form. Amount and Description are mandatory; use the radio options below to show or hide optional fields.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetQuickPrefs}
+                    className="text-xs text-ink-500 hover:text-ink-800 underline self-start sm:self-auto font-medium transition"
+                  >
+                    Reset to Default
+                  </button>
+                </div>
+
+                {/* Fields Table/Card */}
+                <div className="overflow-hidden rounded-2xl border border-ink-150 bg-white divide-y divide-ink-100 shadow-2xs">
+                  {QUICK_FORM_FIELDS.map((field) => {
+                    const isMandatory = field.isMandatory;
+                    const isChecked = isMandatory ? true : !!quickPrefs[field.key];
+
+                    return (
+                      <div
+                        key={field.key}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:p-4 gap-3 hover:bg-ink-50/40 transition"
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ink-50 border border-ink-150 text-base shadow-2xs">
+                            {field.icon}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-ink-900">{field.label}</span>
+                              {isMandatory && (
+                                <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200/80 px-2 py-0.5 rounded-full">
+                                  Mandatory
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-ink-500 mt-0.5">{field.description}</p>
+                          </div>
+                        </div>
+
+                        {/* Radio Controls */}
+                        <div className="shrink-0 pl-12 sm:pl-0">
+                          {isMandatory ? (
+                            <div className="flex items-center gap-2 text-xs font-semibold text-ink-400">
+                              <label className="flex items-center gap-1.5 cursor-not-allowed opacity-75">
+                                <input
+                                  type="radio"
+                                  name={`quick_pref_${field.key}`}
+                                  checked={true}
+                                  readOnly
+                                  disabled
+                                  className="h-3.5 w-3.5 accent-brand-700 cursor-not-allowed"
+                                />
+                                <span>Always Included</span>
+                              </label>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 bg-ink-50/70 p-1 rounded-xl border border-ink-200/60">
+                              <label
+                                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition ${
+                                  isChecked
+                                    ? 'bg-brand-700 text-white shadow-2xs'
+                                    : 'text-ink-600 hover:text-ink-900'
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`quick_pref_${field.key}`}
+                                  value="show"
+                                  checked={isChecked}
+                                  onChange={() => handleUpdateQuickPref(field.key, true)}
+                                  className="h-3.5 w-3.5 accent-brand-700 cursor-pointer"
+                                />
+                                <span>Show</span>
+                              </label>
+
+                              <label
+                                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition ${
+                                  !isChecked
+                                    ? 'bg-ink-800 text-white shadow-2xs'
+                                    : 'text-ink-600 hover:text-ink-900'
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`quick_pref_${field.key}`}
+                                  value="hide"
+                                  checked={!isChecked}
+                                  onChange={() => handleUpdateQuickPref(field.key, false)}
+                                  className="h-3.5 w-3.5 accent-ink-800 cursor-pointer"
+                                />
+                                <span>Hide</span>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Live Form Summary */}
+                <div className="p-3.5 rounded-2xl bg-brand-50/40 border border-brand-200/50 flex flex-wrap items-center gap-2 text-xs text-ink-700">
+                  <span className="font-bold text-brand-900 flex items-center gap-1">
+                    <span>⚡ Quick Form will include:</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-brand-200 text-ink-800 font-semibold text-[11px]">
+                    ₹ Amount <span className="text-rose-500">*</span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-brand-200 text-ink-800 font-semibold text-[11px]">
+                    📝 Description <span className="text-rose-500">*</span>
+                  </span>
+                  {quickPrefs.specialExpenseType && (
+                    <span className="px-2 py-0.5 rounded-md bg-brand-100 text-brand-900 font-semibold text-[11px]">
+                      🔄 Transfer & Lending
+                    </span>
+                  )}
+                  {quickPrefs.quickCategories && (
+                    <span className="px-2 py-0.5 rounded-md bg-brand-100 text-brand-900 font-semibold text-[11px]">
+                      ⚡ Quick Categories
+                    </span>
+                  )}
+                  {quickPrefs.categoryDropdown && (
+                    <span className="px-2 py-0.5 rounded-md bg-brand-100 text-brand-900 font-semibold text-[11px]">
+                      📁 Category Dropdown
+                    </span>
+                  )}
+                  {quickPrefs.categoryType && (
+                    <span className="px-2 py-0.5 rounded-md bg-brand-100 text-brand-900 font-semibold text-[11px]">
+                      📌 Category Type
+                    </span>
+                  )}
+                  {quickPrefs.date ? (
+                    <span className="px-2 py-0.5 rounded-md bg-brand-100 text-brand-900 font-semibold text-[11px]">
+                      📅 Date & Time (Manual)
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-md bg-ink-100 text-ink-600 font-medium text-[11px]">
+                      📅 Date & Time (Auto Current Timestamp)
+                    </span>
+                  )}
+                  {quickPrefs.paymentMethod && (
+                    <span className="px-2 py-0.5 rounded-md bg-brand-100 text-brand-900 font-semibold text-[11px]">
+                      💳 Payment Method
+                    </span>
+                  )}
+                  {quickPrefs.paymentAccount && (
+                    <span className="px-2 py-0.5 rounded-md bg-brand-100 text-brand-900 font-semibold text-[11px]">
+                      🏦 Payment Account
+                    </span>
+                  )}
+                  {quickPrefs.tags && (
+                    <span className="px-2 py-0.5 rounded-md bg-brand-100 text-brand-900 font-semibold text-[11px]">
+                      🏷️ Tags
+                    </span>
+                  )}
                 </div>
               </div>
 

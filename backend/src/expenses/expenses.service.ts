@@ -183,9 +183,12 @@ export class ExpensesService {
       create: { name: tag, userId }
     }));
 
-    let id = generateTransactionTrackingId(dto.transactionType);
+    const isReceivable = Boolean(dto.isReceivable || dto.transactionType === 'RECEIVABLE');
+    const transactionType = dto.transactionType === 'RECEIVABLE' ? 'EXPENSE' : (dto.transactionType || 'EXPENSE');
+
+    let id = generateTransactionTrackingId(isReceivable ? 'RECEIVABLE' : transactionType);
     while (await this.prisma.expense.findUnique({ where: { id } })) {
-      id = generateTransactionTrackingId(dto.transactionType);
+      id = generateTransactionTrackingId(isReceivable ? 'RECEIVABLE' : transactionType);
     }
 
     return this.prisma.expense.create({
@@ -196,10 +199,14 @@ export class ExpensesService {
         category: dto.category?.trim() || null,
         description: dto.description?.trim() || null,
         paymentMethod: dto.paymentMethod?.trim() || 'Card',
+        paymentAccount: dto.paymentAccount?.trim() || null,
         date: new Date(dto.date),
-        transactionType: dto.transactionType || 'EXPENSE',
+        transactionType,
         toUserId: dto.toUserId || null,
         categoryType: dto.categoryType || null,
+        isReceivable,
+        receivableStatus: isReceivable ? (dto.receivableStatus || 'OUTSTANDING') : null,
+        reimbursedAmount: isReceivable ? (dto.reimbursedAmount ?? 0) : null,
         tags: {
           connectOrCreate: tagConnectOrCreate
         }
@@ -396,33 +403,37 @@ export class ExpensesService {
       }
     }
 
-    // 5. Split expense inserts into safe batches accounting for 11 bound parameters per record
-    // floor(98 / 11) = 8 records per statement (88 bound params, strictly below D1 100 limit)
+    // 5. Split expense inserts into safe batches accounting for 15 bound parameters per record
+    // floor(98 / 15) = 6 records per statement (90 bound params, strictly below D1 100 limit)
     const recordsToInsert = recordsWithIds.filter((r) => !existingIds.has(r.id));
     const nowIso = new Date().toISOString();
-    const EXPENSE_INSERT_BATCH = 8;
+    const EXPENSE_INSERT_BATCH = 6;
     for (let i = 0; i < recordsToInsert.length; i += EXPENSE_INSERT_BATCH) {
       const chunk = recordsToInsert.slice(i, i + EXPENSE_INSERT_BATCH);
       const placeholders: string[] = [];
       const params: any[] = [];
       for (const exp of chunk) {
-        placeholders.push('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        placeholders.push('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         params.push(
           exp.id,
           exp.amount,
           exp.category,
           exp.description,
           exp.paymentMethod,
+          (exp as any).paymentAccount || null,
           exp.date.toISOString(),
           nowIso,
           userId,
           exp.transactionType,
           exp.toUserId,
-          exp.categoryType
+          exp.categoryType,
+          (exp as any).isReceivable ? 1 : 0,
+          (exp as any).receivableStatus || null,
+          (exp as any).reimbursedAmount ?? 0
         );
       }
       await this.prisma.$executeRawUnsafe(
-        `INSERT INTO "Expense" ("id", "amount", "category", "description", "paymentMethod", "date", "createdAt", "userId", "transactionType", "toUserId", "categoryType") VALUES ${placeholders.join(', ')}`,
+        `INSERT INTO "Expense" ("id", "amount", "category", "description", "paymentMethod", "paymentAccount", "date", "createdAt", "userId", "transactionType", "toUserId", "categoryType", "isReceivable", "receivableStatus", "reimbursedAmount") VALUES ${placeholders.join(', ')}`,
         ...params
       );
     }
@@ -554,6 +565,13 @@ export class ExpensesService {
       };
     }
 
+    let isReceivableUpdate = dto.isReceivable;
+    let transactionTypeUpdate = dto.transactionType;
+    if (dto.transactionType === 'RECEIVABLE') {
+      transactionTypeUpdate = 'EXPENSE';
+      isReceivableUpdate = true;
+    }
+
     return this.prisma.expense.update({
       where: { id: expenseId },
       data: {
@@ -561,10 +579,14 @@ export class ExpensesService {
         category: dto.category !== undefined ? (dto.category?.trim() || null) : undefined,
         description: dto.description !== undefined ? (dto.description?.trim() || null) : undefined,
         paymentMethod: dto.paymentMethod !== undefined ? (dto.paymentMethod?.trim() || 'Card') : undefined,
+        paymentAccount: dto.paymentAccount !== undefined ? (dto.paymentAccount?.trim() || null) : undefined,
         ...(dto.date ? { date: new Date(dto.date) } : {}),
-        ...(dto.transactionType !== undefined ? { transactionType: dto.transactionType } : {}),
+        ...(transactionTypeUpdate !== undefined ? { transactionType: transactionTypeUpdate } : {}),
         toUserId: dto.toUserId !== undefined ? (dto.toUserId || null) : undefined,
         categoryType: dto.categoryType !== undefined ? (dto.categoryType || null) : undefined,
+        ...(isReceivableUpdate !== undefined ? { isReceivable: isReceivableUpdate } : {}),
+        ...(dto.receivableStatus !== undefined ? { receivableStatus: dto.receivableStatus } : {}),
+        ...(dto.reimbursedAmount !== undefined ? { reimbursedAmount: dto.reimbursedAmount } : {}),
         ...(tagsUpdate ? { tags: tagsUpdate } : {})
       },
       include: {

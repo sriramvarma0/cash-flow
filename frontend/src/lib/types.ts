@@ -13,12 +13,16 @@ export type Expense = {
   category: string | null;
   description: string | null;
   paymentMethod: string;
+  paymentAccount?: string | null;
   date: string;
   createdAt: string;
   userId: string;
-  transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
+  transactionType?: 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT' | 'RECEIVABLE';
   toUserId?: string | null;
   categoryType?: string | null;
+  isReceivable?: boolean | null;
+  receivableStatus?: 'OUTSTANDING' | 'PARTIALLY_SETTLED' | 'SETTLED' | null;
+  reimbursedAmount?: number | null;
   user?: { id: string; name: string; email: string };
   toUser?: { id: string; name: string; email: string } | null;
   tags?: { id: string; name: string }[];
