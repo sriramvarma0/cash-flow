@@ -96,9 +96,9 @@ export class InvestmentsService implements OnModuleInit {
         }
       }
 
-      // Ensure unique index on (userId, code)
+      // Ensure index on (userId, code)
       await this.prisma.$executeRawUnsafe(`
-        CREATE UNIQUE INDEX IF NOT EXISTS "Investment_userId_code_key" ON "Investment"("userId", "code");
+        CREATE INDEX IF NOT EXISTS "Investment_userId_code_idx" ON "Investment"("userId", "code");
       `);
 
       // 4. Backfill any Investment rows where assetId is empty or null

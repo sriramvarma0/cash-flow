@@ -456,6 +456,13 @@ async function runMigrations() {
         // we can safely log and continue without failing the migration.
         if (errMsg.includes('duplicate column name') || errMsg.includes('already exists')) {
           console.warn(`  ⚠️ Statement ${i + 1}: Column or index already present, continuing.`);
+        } else if (errMsg.includes('unique constraint failed') && stmt.includes('Investment_userId_code_key')) {
+          console.warn(`  ⚠️ Statement ${i + 1}: Unique index failed due to historical duplicate rows in production. Creating non-unique index "Investment_userId_code_idx" instead.`);
+          await executeD1Query(
+            `CREATE INDEX IF NOT EXISTS "Investment_userId_code_idx" ON "Investment"("userId", "code");`,
+            [],
+            `Fallback non-unique index creation`
+          );
         } else {
           console.error(`  ❌ Statement ${i + 1} failed: ${stmt}`);
           throw stmtErr;

@@ -127,7 +127,7 @@ model Investment {
   createdAt    DateTime                @default(now())
   updatedAt    DateTime                @updatedAt
 
-  @@unique([userId, code])
+  @@index([userId, code])
   @@index([userId])
   @@index([assetId])
 }

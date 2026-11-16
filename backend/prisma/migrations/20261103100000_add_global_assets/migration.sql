@@ -15,6 +15,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS "Asset_code_key" ON "Asset"("code");
 -- CreateIndex: Investment_assetId_idx
 CREATE INDEX IF NOT EXISTS "Investment_assetId_idx" ON "Investment"("assetId");
 
--- CreateIndex: Investment_userId_code_key
-CREATE UNIQUE INDEX IF NOT EXISTS "Investment_userId_code_key" ON "Investment"("userId", "code");
+-- CreateIndex: Investment_userId_code_idx
+CREATE INDEX IF NOT EXISTS "Investment_userId_code_idx" ON "Investment"("userId", "code");
 
