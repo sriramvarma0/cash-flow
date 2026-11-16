@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   fetchCurrentUser,
   fetchExpenses,
   getSavedAccounts,
+  saveAccount,
+  switchAccount,
   exportAccountData,
   importAccountData,
   requestToJoinGroup,
@@ -12,6 +15,9 @@ import {
   setup2fa,
   enable2fa,
   disable2fa,
+  setupEmail2fa,
+  enableEmail2fa,
+  disableEmail2fa,
   regenerateRecoveryCodes,
   changePassword,
   type SavedAccount,
@@ -109,6 +115,19 @@ export default function SettingsPage() {
   const [regeneratedCodes, setRegeneratedCodes] = useState<string[]>([]);
   const [copiedRegenCodes, setCopiedRegenCodes] = useState(false);
 
+  // Email 2FA Setup Modal State
+  const [isEmail2faSetupModalOpen, setIsEmail2faSetupModalOpen] = useState(false);
+  const [emailSetupCode, setEmailSetupCode] = useState('');
+  const [emailSetupError, setEmailSetupError] = useState('');
+  const [emailSetupSubmitting, setEmailSetupSubmitting] = useState(false);
+  const [emailSetupSentMsg, setEmailSetupSentMsg] = useState('');
+
+  // Email 2FA Disable Modal State
+  const [isEmail2faDisableModalOpen, setIsEmail2faDisableModalOpen] = useState(false);
+  const [emailDisablePassword, setEmailDisablePassword] = useState('');
+  const [emailDisableError, setEmailDisableError] = useState('');
+  const [emailDisableSubmitting, setEmailDisableSubmitting] = useState(false);
+
   // Change Password State
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -126,6 +145,10 @@ export default function SettingsPage() {
           get2faStatus().catch(() => null)
         ]);
         setUser(currentUser);
+        if (currentUser && currentUser.currentToken) {
+          saveAccount(currentUser, currentUser.currentToken);
+          setSavedAccounts(getSavedAccounts());
+        }
         if (status2fa) {
           setTwoFactorStatus(status2fa);
         }
@@ -508,6 +531,59 @@ export default function SettingsPage() {
     }
   };
 
+  const handleStartEmail2faSetup = async () => {
+    setEmailSetupError('');
+    setEmailSetupCode('');
+    setEmailSetupSentMsg('');
+    setEmailSetupSubmitting(true);
+    setIsEmail2faSetupModalOpen(true);
+    try {
+      const res = await setupEmail2fa();
+      setEmailSetupSentMsg(res.message);
+    } catch (err) {
+      setEmailSetupError(err instanceof Error ? err.message : 'Failed to send setup email code');
+    } finally {
+      setEmailSetupSubmitting(false);
+    }
+  };
+
+  const handleConfirmEmail2faEnable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailSetupCode.trim()) return;
+    setEmailSetupError('');
+    setEmailSetupSubmitting(true);
+    try {
+      await enableEmail2fa(emailSetupCode.trim());
+      await load2faStatus();
+      setIsEmail2faSetupModalOpen(false);
+      setEmailSetupCode('');
+    } catch (err) {
+      setEmailSetupError(err instanceof Error ? err.message : 'Invalid code. Please check your email and try again.');
+    } finally {
+      setEmailSetupSubmitting(false);
+    }
+  };
+
+  const handleExecuteEmail2faDisable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailDisablePassword) {
+      setEmailDisableError('Please enter your current password to confirm.');
+      return;
+    }
+    setEmailDisableError('');
+    setEmailDisableSubmitting(true);
+    try {
+      await disableEmail2fa({ password: emailDisablePassword });
+      await load2faStatus();
+      setIsEmail2faDisableModalOpen(false);
+      setEmailDisablePassword('');
+    } catch (err) {
+      setEmailDisableError(err instanceof Error ? err.message : 'Failed to disable Email 2FA. Check your password.');
+    } finally {
+      setEmailDisableSubmitting(false);
+    }
+  };
+
   const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError('');
@@ -718,10 +794,23 @@ export default function SettingsPage() {
               </div>
 
               <div className="pt-4 border-t border-ink-100">
-                <h4 className="text-sm font-semibold text-ink-900">Linked Accounts in this browser</h4>
-                <p className="text-xs text-ink-500 mt-0.5">
-                  You have {savedAccounts.length} saved accounts in your session storage. Use the navbar switcher to toggle.
-                </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-semibold text-ink-900">Linked Accounts in this browser</h4>
+                    <p className="text-xs text-ink-500 mt-0.5">
+                      You have {savedAccounts.length} saved account{savedAccounts.length === 1 ? '' : 's'} in your session storage. Use the navbar switcher or toggle below.
+                    </p>
+                  </div>
+                  <Link
+                    href="/login?addAccount=true"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-ink-200 bg-white hover:bg-ink-50 text-xs font-semibold text-ink-700 transition w-fit shadow-2xs"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>Add another account</span>
+                  </Link>
+                </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {savedAccounts.map((acc) => (
                     <div key={acc.id} className="flex justify-between items-center p-3 border border-ink-150 rounded-2xl bg-ink-50/40 text-xs">
@@ -736,6 +825,22 @@ export default function SettingsPage() {
                         </p>
                         <p className="text-ink-500 text-xxs truncate mt-0.5">{acc.email}</p>
                       </div>
+                      {acc.id !== user.id && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await switchAccount(acc.accessToken);
+                              window.location.href = '/dashboard';
+                            } catch (err) {
+                              alert(err instanceof Error ? err.message : 'Failed to switch account');
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-white hover:bg-ink-100 border border-ink-200 rounded-lg text-xxs font-semibold text-ink-800 transition shrink-0"
+                        >
+                          Switch
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1422,75 +1527,160 @@ export default function SettingsPage() {
                       )}
                     </div>
                     <p className="text-xs sm:text-sm text-ink-600 max-w-2xl leading-relaxed">
-                      Protect your financial account with military-grade two-factor authentication. When enabled, logging in requires both your password and a live 6-digit TOTP verification code from your mobile authenticator app.
+                      Protect your financial account with two-factor authentication. You can choose to protect your account using a Mobile Authenticator App (RFC 6238 TOTP), Email One-Time Password (OTP), or enable both simultaneously for maximum flexibility.
                     </p>
                   </div>
+                </div>
 
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    {twoFactorStatus?.enabled ? (
-                      <>
+                {/* Dual 2FA Options Grid */}
+                <div className="mt-6 grid gap-6 md:grid-cols-2">
+                  {/* Option 1: Mobile Authenticator App */}
+                  <div className="p-6 rounded-2xl bg-white border border-ink-150 shadow-xxs flex flex-col justify-between space-y-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="p-2 rounded-xl bg-purple-50 text-purple-700 border border-purple-200">
+                            📱
+                          </span>
+                          <div>
+                            <h3 className="text-sm font-bold text-ink-900">Authenticator App</h3>
+                            <p className="text-[11px] text-ink-400">TOTP (Google Authenticator, Authy)</p>
+                          </div>
+                        </div>
+                        {twoFactorStatus?.totpEnabled ? (
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            Active
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-ink-100 text-ink-500 border border-ink-200">
+                            Disabled
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-ink-600 leading-relaxed">
+                        Use a time-based 6-digit verification code generated by an app on your mobile device (Google Authenticator, Microsoft Authenticator, Apple Passwords, or 1Password).
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-ink-100">
+                      {twoFactorStatus?.totpEnabled ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRegenPassword('');
+                              setRegenError('');
+                              setRegeneratedCodes([]);
+                              setCopiedRegenCodes(false);
+                              setIsRegenerateModalOpen(true);
+                            }}
+                            className="cash-button-secondary py-1.5 px-3 text-xs font-semibold flex items-center gap-1.5 shadow-xxs"
+                          >
+                            <span>Backup Codes ({twoFactorStatus.remainingRecoveryCodes ?? 8})</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDisablePassword('');
+                              setDisableCode('');
+                              setDisableError('');
+                              setIs2faDisableModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition shadow-xxs"
+                          >
+                            Disable
+                          </button>
+                        </>
+                      ) : (
                         <button
                           type="button"
-                          onClick={() => {
-                            setRegenPassword('');
-                            setRegenError('');
-                            setRegeneratedCodes([]);
-                            setCopiedRegenCodes(false);
-                            setIsRegenerateModalOpen(true);
-                          }}
-                          className="cash-button-secondary py-2 px-3.5 text-xs font-semibold flex items-center gap-1.5 shadow-xxs"
+                          onClick={handleStart2faSetup}
+                          className="cash-button-primary py-2 px-3.5 text-xs font-semibold flex items-center gap-1.5 shadow-xs w-full justify-center"
                         >
-                          <svg className="w-4 h-4 text-ink-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                           </svg>
-                          <span>Backup Codes</span>
+                          <span>Enable Authenticator</span>
                         </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Option 2: Email One-Time Password (OTP) */}
+                  <div className="p-6 rounded-2xl bg-white border border-ink-150 shadow-xxs flex flex-col justify-between space-y-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="p-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">
+                            ✉️
+                          </span>
+                          <div>
+                            <h3 className="text-sm font-bold text-ink-900">Email OTP</h3>
+                            <p className="text-[11px] text-ink-400">Transactional Email Service</p>
+                          </div>
+                        </div>
+                        {twoFactorStatus?.emailOtpEnabled ? (
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            Active
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-ink-100 text-ink-500 border border-ink-200">
+                            Disabled
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-ink-600 leading-relaxed">
+                        Receive a 6-digit one-time password in your email ({twoFactorStatus?.maskedEmail || twoFactorStatus?.email || user?.email}) each time you sign in to your CashFlow account.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-ink-100">
+                      {twoFactorStatus?.emailOtpEnabled ? (
                         <button
                           type="button"
                           onClick={() => {
-                            setDisablePassword('');
-                            setDisableCode('');
-                            setDisableError('');
-                            setIs2faDisableModalOpen(true);
+                            setEmailDisablePassword('');
+                            setEmailDisableError('');
+                            setIsEmail2faDisableModalOpen(true);
                           }}
-                          className="px-3.5 py-2 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition shadow-xxs"
+                          className="px-3.5 py-1.5 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition shadow-xxs"
                         >
-                          Disable 2FA
+                          Disable Email OTP
                         </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleStart2faSetup}
-                        className="cash-button-primary py-2.5 px-4 text-xs font-semibold flex items-center gap-2 shadow-xs"
-                      >
-                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        <span>Enable Mobile Authenticator (2FA)</span>
-                      </button>
-                    )}
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleStartEmail2faSetup}
+                          className="cash-button-primary py-2 px-3.5 text-xs font-semibold flex items-center gap-1.5 shadow-xs w-full justify-center"
+                        >
+                          <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                          <span>Enable Email OTP</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 {/* 2FA Specs Details */}
-                <div className="mt-6 pt-2 grid gap-4 sm:grid-cols-3">
+                <div className="mt-6 pt-4 border-t border-ink-100 grid gap-4 sm:grid-cols-3">
                   <div className="p-4 rounded-2xl bg-ink-50/70 border border-ink-150">
                     <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Security Standard</p>
-                    <p className="mt-1 text-sm font-bold text-ink-900">RFC 6238 TOTP Protocol</p>
-                    <p className="mt-0.5 text-xs text-ink-500">Time-based one-time passwords refreshed every 30 seconds</p>
+                    <p className="mt-1 text-sm font-bold text-ink-900">RFC 6238 & 10-Min OTP</p>
+                    <p className="mt-0.5 text-xs text-ink-500">Time-based codes and cryptographic transactional delivery</p>
                   </div>
                   <div className="p-4 rounded-2xl bg-ink-50/70 border border-ink-150">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Supported Apps</p>
-                    <p className="mt-1 text-sm font-bold text-ink-900">Google, Microsoft, Authy</p>
-                    <p className="mt-0.5 text-xs text-ink-500">Compatible with Apple Passwords, 1Password & Bitwarden</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Active Delivery</p>
+                    <p className="mt-1 text-sm font-bold text-ink-900">Dual Provider System</p>
+                    <p className="mt-0.5 text-xs text-ink-500">Powered by Google Gmail OAuth2 and Resend APIs</p>
                   </div>
                   <div className="p-4 rounded-2xl bg-ink-50/70 border border-ink-150">
                     <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Emergency Recovery</p>
                     <p className="mt-1 text-sm font-bold text-ink-900">
-                      {twoFactorStatus?.enabled
-                        ? `${twoFactorStatus.remainingRecoveryCodes ?? 8} Codes Remaining`
-                        : '8 Single-Use Codes'}
+                      {twoFactorStatus?.remainingRecoveryCodes ?? 8} Single-Use Codes
                     </p>
                     <p className="mt-0.5 text-xs text-ink-500">SHA-256 hashed fallback tokens with auto-burn on use</p>
                   </div>
@@ -2052,6 +2242,157 @@ export default function SettingsPage() {
                   </form>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* EMAIL 2FA SETUP MODAL */}
+        {isEmail2faSetupModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/50 backdrop-blur-xs p-4">
+            <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-ink-150 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="p-6 bg-blue-50/60 border-b border-ink-150 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2 rounded-xl bg-blue-100 text-blue-800 border border-blue-200">
+                    ✉️
+                  </span>
+                  <div>
+                    <h3 className="text-base font-bold text-ink-900">Enable Email 2FA</h3>
+                    <p className="text-xs text-ink-500">Confirm your email address</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsEmail2faSetupModalOpen(false)}
+                  className="p-1.5 rounded-lg text-ink-400 hover:text-ink-700 hover:bg-ink-100 transition"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                {emailSetupSentMsg && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800 font-medium">
+                    {emailSetupSentMsg}
+                  </div>
+                )}
+
+                <p className="text-xs text-ink-600 leading-relaxed">
+                  We've delivered a 6-digit confirmation code to your email. Enter the code below to verify ownership and activate Email Two-Factor Authentication.
+                </p>
+
+                <form onSubmit={handleConfirmEmail2faEnable} className="space-y-4">
+                  <div>
+                    <label className="cash-label" htmlFor="emailSetupCode">6-Digit Verification Code</label>
+                    <input
+                      id="emailSetupCode"
+                      type="text"
+                      className="cash-input text-center text-2xl tracking-widest font-mono font-bold"
+                      value={emailSetupCode}
+                      onChange={(e) => setEmailSetupCode(e.target.value)}
+                      placeholder="000000"
+                      maxLength={6}
+                      autoFocus
+                      required
+                    />
+                  </div>
+
+                  {emailSetupError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium">
+                      {emailSetupError}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="submit"
+                      disabled={emailSetupSubmitting || emailSetupCode.trim().length !== 6}
+                      className="cash-button-primary flex-1 py-2.5 text-xs font-semibold disabled:opacity-50"
+                    >
+                      {emailSetupSubmitting ? 'Verifying...' : 'Verify & Activate'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEmail2faSetupModalOpen(false)}
+                      className="px-4 py-2.5 text-xs font-semibold border border-ink-200 hover:bg-ink-100 rounded-xl text-ink-600 transition"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* EMAIL 2FA DISABLE MODAL */}
+        {isEmail2faDisableModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/50 backdrop-blur-xs p-4">
+            <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-ink-150 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="p-6 bg-red-50/60 border-b border-red-150 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2 rounded-xl bg-red-100 text-red-800 border border-red-200">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h3 className="text-base font-bold text-ink-900">Disable Email 2FA</h3>
+                    <p className="text-xs text-ink-500">Security confirmation required</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsEmail2faDisableModalOpen(false)}
+                  className="p-1.5 rounded-lg text-ink-400 hover:text-ink-700 hover:bg-ink-100 transition"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form onSubmit={handleExecuteEmail2faDisable} className="p-6 space-y-4">
+                <p className="text-xs text-ink-600 leading-relaxed">
+                  Disabling Email 2FA lowers your account's protection. Please enter your account password to confirm.
+                </p>
+
+                <div>
+                  <label className="cash-label" htmlFor="emailDisablePassword">Account Password</label>
+                  <input
+                    id="emailDisablePassword"
+                    type="password"
+                    className="cash-input"
+                    value={emailDisablePassword}
+                    onChange={(e) => setEmailDisablePassword(e.target.value)}
+                    placeholder="Enter current password"
+                    autoFocus
+                    required
+                  />
+                </div>
+
+                {emailDisableError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium">
+                    {emailDisableError}
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="submit"
+                    disabled={emailDisableSubmitting || !emailDisablePassword}
+                    className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold flex-1 transition disabled:opacity-50"
+                  >
+                    {emailDisableSubmitting ? 'Disabling...' : 'Confirm & Disable'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEmail2faDisableModalOpen(false)}
+                    className="px-4 py-2.5 text-xs font-semibold border border-ink-200 hover:bg-ink-100 rounded-xl text-ink-600 transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

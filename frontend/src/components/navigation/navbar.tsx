@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { logout, fetchCurrentUser, getSavedAccounts, removeSavedAccount, clearAllSavedAccounts, switchAccount, SavedAccount, fetchPendingInvitations, respondToInvitation, GroupInvitation } from '../../lib/api';
+import { logout, fetchCurrentUser, getSavedAccounts, saveAccount, removeSavedAccount, clearAllSavedAccounts, switchAccount, SavedAccount, fetchPendingInvitations, respondToInvitation, GroupInvitation } from '../../lib/api';
 import { AuthUser } from '../../lib/types';
 import { UniversalSearch } from './universal-search';
 
@@ -138,6 +138,10 @@ export function Navbar({ onMenuClick }: NavbarProps) {
       try {
         const currentUser = await fetchCurrentUser();
         setUser(currentUser);
+        if (currentUser && currentUser.currentToken) {
+          saveAccount(currentUser, currentUser.currentToken);
+          setSavedAccounts(getSavedAccounts());
+        }
       } catch (err) {
         console.error('Failed to load user info', err);
       }
@@ -151,7 +155,7 @@ export function Navbar({ onMenuClick }: NavbarProps) {
     try {
       await switchAccount(account.accessToken);
       setIsDropdownOpen(false);
-      window.location.reload();
+      window.location.href = '/dashboard';
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to switch account');
     }
@@ -170,26 +174,23 @@ export function Navbar({ onMenuClick }: NavbarProps) {
     if (remaining.length > 0) {
       try {
         await switchAccount(remaining[0].accessToken);
-        window.location.reload();
+        window.location.href = '/dashboard';
       } catch {
         await logout();
         clearAllSavedAccounts();
-        router.replace('/login');
-        router.refresh();
+        window.location.href = '/login';
       }
     } else {
       await logout();
       clearAllSavedAccounts();
-      router.replace('/login');
-      router.refresh();
+      window.location.href = '/login';
     }
   }
 
   async function handleSignOutAll() {
     await logout();
     clearAllSavedAccounts();
-    router.replace('/login');
-    router.refresh();
+    window.location.href = '/login';
   }
 
   // Get user initials for avatar

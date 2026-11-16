@@ -41,11 +41,24 @@ npm run dev:backend
 npm run dev:frontend
 ```
 
+## Testing & Verification
+
+Run the test suites:
+
+```bash
+# Run email provider verification test suite
+npm run test:email
+
+# Run full backend test suite
+npm test
+```
+
 ---
 
 ## MVP Features
 
 - JWT authentication with multi-session support
+- Provider-independent transactional email system (Gmail OAuth2 & Resend with custom domain) — see [Email Provider Setup Guide](file:///docs/email-providers-setup.md)
 - Expense CRUD with dynamic tag and category management
 - Shared expense groups & member invitations
 - Interactive investment portfolio tracking & Yahoo Finance live quotes

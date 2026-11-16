@@ -5,7 +5,7 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Paths that do not require authentication
-  const isPublicPath = pathname === '/login' || pathname === '/register';
+  const isPublicPath = pathname === '/login' || pathname === '/register' || pathname === '/verify-email';
 
   if (!token && !isPublicPath) {
     const loginUrl = new URL('/login', request.url);
@@ -14,7 +14,9 @@ export function middleware(request: NextRequest) {
   }
 
   // If user is authenticated and trying to access login/register, redirect to dashboard
-  if (token && isPublicPath) {
+  // UNLESS they are explicitly adding another account (?addAccount=true)
+  const isAddAccount = request.nextUrl.searchParams.get('addAccount') === 'true';
+  if (token && isPublicPath && !isAddAccount && pathname !== '/verify-email') {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 

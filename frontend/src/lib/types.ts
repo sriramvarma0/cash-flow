@@ -5,6 +5,8 @@ export type AuthUser = {
   phoneNumber: string;
   createdAt: string;
   twoFactorEnabled?: boolean;
+  isEmailVerified?: boolean;
+  currentToken?: string;
 };
 
 export type Expense = {
@@ -39,6 +41,8 @@ export type InvestmentTransaction = {
   userId: string;
   createdAt: string;
   investment?: {
+    id?: string;
+    assetId?: string;
     code: string;
     name: string;
     type: string;
@@ -47,6 +51,8 @@ export type InvestmentTransaction = {
 
 export type Investment = {
   id: string;
+  assetId?: string;
+  holdingId?: string;
   code: string;
   name: string;
   type: string;
@@ -73,5 +79,3 @@ export type CategoryBudget = {
   createdAt?: string;
   updatedAt?: string;
 };
-
-

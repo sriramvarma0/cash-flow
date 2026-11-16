@@ -12,6 +12,8 @@ import { InvestmentTransaction } from '../../../lib/types';
 
 interface Holding {
   id?: string;
+  assetId?: string;
+  holdingId?: string;
   code: string;
   name: string;
   type: string;
@@ -46,6 +48,7 @@ function InvestmentsContent() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Form states
+  const [transactionType, setTransactionType] = useState<'BUY' | 'SELL'>('BUY');
   const [type, setType] = useState('Stock');
   const [code, setCode] = useState('');
   const [units, setUnits] = useState('');
@@ -136,6 +139,8 @@ function InvestmentsContent() {
 
     return {
       items,
+      totalInvested: totalCostBasis,
+      totalCostBasis,
       totalValue: portfolioTotal,
       totalGain,
       percentageGain: Number(percentageGain.toFixed(2)),
@@ -154,7 +159,7 @@ function InvestmentsContent() {
         item.code.toLowerCase().includes(q) ||
         item.name.toLowerCase().includes(q) ||
         item.type.toLowerCase().includes(q) ||
-        (item.id && item.id.toLowerCase().includes(q))
+        ((item.assetId && item.assetId.toLowerCase().includes(q)) || (item.id && item.id.toLowerCase().includes(q)))
     );
   }, [metrics.items, searchQuery]);
 
@@ -181,7 +186,8 @@ function InvestmentsContent() {
         const codeMatch = (tx.investment?.code || '').toLowerCase().includes(q);
         const nameMatch = (tx.investment?.name || '').toLowerCase().includes(q);
         const idMatch = (tx.id || '').toLowerCase().includes(q);
-        if (!codeMatch && !nameMatch && !idMatch) return false;
+        const assetIdMatch = ((tx.investment as any)?.assetId || "").toLowerCase().includes(q);
+        if (!codeMatch && !nameMatch && !idMatch && !assetIdMatch) return false;
       }
       return true;
     });
@@ -194,27 +200,54 @@ function InvestmentsContent() {
       return;
     }
 
+    const numUnits = Number(units);
+    const numPrice = Number(buyPrice);
+
+    if (numUnits <= 0 || numPrice <= 0) {
+      alert('Units and price must be greater than 0.');
+      return;
+    }
+
+    if (transactionType === 'SELL') {
+      const match = holdings.find((h) => h.code.toUpperCase() === code.trim().toUpperCase());
+      if (!match) {
+        alert(`Cannot sell asset "${code}". You do not currently hold this asset in your portfolio.`);
+        return;
+      }
+      if (numUnits > match.units) {
+        alert(`Cannot sell ${numUnits} units. You currently own ${match.units} units of ${match.name} (${match.code}).`);
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-      const newHolding = await createInvestment({
+      await createInvestment({
         code: code.trim().toUpperCase(),
         type,
-        units: Number(units),
-        buyPrice: Number(buyPrice),
-        date: new Date(date).toISOString()
+        units: numUnits,
+        buyPrice: numPrice,
+        date: new Date(date).toISOString(),
+        transactionType
       });
 
-      setHoldings([...holdings, newHolding]);
+      const [data, txData] = await Promise.all([
+        fetchInvestments(),
+        fetchInvestmentTransactions().catch(() => [])
+      ]);
+      setHoldings(data);
+      setAllTransactions(txData || []);
 
       // Reset form & close modal
       setCode('');
       setType('Stock');
       setUnits('');
       setBuyPrice('');
+      setTransactionType('BUY');
       setDate(getLocalDateTimeString());
       setIsModalOpen(false);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to save investment');
+      alert(err instanceof Error ? err.message : 'Failed to save investment transaction');
     } finally {
       setSaving(false);
     }
@@ -268,12 +301,22 @@ function InvestmentsContent() {
         {/* Portfolio Stats Row */}
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-left animate-in fade-in duration-200">
           <article className="cash-card p-5 bg-white border border-ink-150 relative overflow-hidden">
-            <p className="text-xs font-semibold text-ink-500">Portfolio Value</p>
+            <p className="text-xs font-semibold text-ink-500">Total Invested</p>
+            <p className="mt-2 text-3xl font-bold tracking-tight text-ink-900">
+              {formatCurrency(metrics.totalInvested)}
+            </p>
+            <div className="mt-2 text-xs text-ink-400">
+              Total cost basis across {holdings.length} {holdings.length === 1 ? 'holding' : 'holdings'}
+            </div>
+          </article>
+
+          <article className="cash-card p-5 bg-white border border-ink-150 relative overflow-hidden">
+            <p className="text-xs font-semibold text-ink-500">Current Value</p>
             <p className="mt-2 text-3xl font-bold tracking-tight text-ink-900">
               {formatCurrency(metrics.totalValue)}
             </p>
             <div className="mt-2 text-xs text-ink-400">
-              Total valuation of active assets
+              Live market valuation of active assets
             </div>
           </article>
 
@@ -282,28 +325,19 @@ function InvestmentsContent() {
             <p className={`mt-2 text-3xl font-bold tracking-tight ${metrics.totalGain >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
               {metrics.totalGain >= 0 ? '+' : ''}{formatCurrency(metrics.totalGain)}
             </p>
-            <div className="mt-2 text-xs font-semibold text-emerald-600">
-              ▲ {metrics.percentageGain}% absolute yield
+            <div className={`mt-2 text-xs font-semibold flex items-center gap-1 ${metrics.totalGain >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              <span>{metrics.totalGain >= 0 ? '▲ +' : '▼ '}{metrics.percentageGain}%</span>
+              <span className="font-normal text-ink-400">all-time yield</span>
             </div>
           </article>
 
           <article className="cash-card p-5 bg-white border border-ink-150 relative overflow-hidden">
-            <p className="text-xs font-semibold text-ink-500">Annualized Dividend Yield</p>
+            <p className="text-xs font-semibold text-ink-500">Dividend Yield</p>
             <p className="mt-2 text-3xl font-bold tracking-tight text-ink-900">
               {metrics.portfolioYield}%
             </p>
             <div className="mt-2 text-xs text-ink-400">
-              Weighted average portfolio yield
-            </div>
-          </article>
-
-          <article className="cash-card p-5 bg-white border border-ink-150 relative overflow-hidden">
-            <p className="text-xs font-semibold text-ink-500">1Y Portfolio Beta</p>
-            <p className="mt-2 text-3xl font-bold tracking-tight text-brand-700">
-              {metrics.portfolioBeta}
-            </p>
-            <div className="mt-2 text-xs text-ink-400">
-              Weighted volatility metric vs index
+              Weighted avg yield · Beta: <span className="font-semibold text-ink-700">{metrics.portfolioBeta}</span>
             </div>
           </article>
         </section>
@@ -370,19 +404,20 @@ function InvestmentsContent() {
                         title="Click to view details"
                       >
                         <td className="px-3 py-3.5 text-left whitespace-nowrap">
-                          {item.id ? (
+                          {(item.assetId || item.id) ? (
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigator.clipboard.writeText(item.id!);
-                                alert(`Asset Tracking ID "${item.id}" copied to clipboard!`);
+                                const aid = item.assetId || item.id!;
+                                navigator.clipboard.writeText(aid);
+                                alert(`Asset Tracking ID "${aid}" copied to clipboard!`);
                               }}
                               title="Click to copy Asset Tracking ID (A + 9 chars)"
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 transition font-mono text-xs font-bold shadow-2xs"
                             >
                               <span className="text-[10px] text-purple-600 font-extrabold">🏷️</span>
-                              <span>{item.id}</span>
+                              <span>{item.assetId || item.id}</span>
                               <span className="text-[10px] text-purple-400 opacity-70">📋</span>
                             </button>
                           ) : (
@@ -642,8 +677,14 @@ function InvestmentsContent() {
           <div className="cash-card max-w-md w-full p-6 bg-white animate-in zoom-in duration-200">
             <div className="mb-4 flex items-center justify-between border-b border-ink-100 pb-4">
               <div className="text-left">
-                <h3 className="text-xl font-semibold text-ink-900">Add Investment</h3>
-                <p className="text-xs text-ink-500">Enter a ticker code. Company name and pricing are resolved automatically.</p>
+                <h3 className="text-xl font-semibold text-ink-900">
+                  {transactionType === 'BUY' ? '🟢 Buy Investment (PB)' : '🟠 Sell Investment (PS)'}
+                </h3>
+                <p className="text-xs text-ink-500">
+                  {transactionType === 'BUY'
+                    ? 'Record a buy order. Automatically creates or updates your asset holding.'
+                    : 'Record a sell order. Deducts units from your current asset holding.'}
+                </p>
               </div>
               <button
                 type="button"
@@ -658,6 +699,56 @@ function InvestmentsContent() {
             </div>
 
             <form onSubmit={handleAddHolding} className="space-y-4 text-left">
+              {/* Order / Transaction Type: Buy / Sell Radio */}
+              <div>
+                <label className="cash-label mb-1.5 block">Order Type</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label
+                    onClick={() => setTransactionType('BUY')}
+                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border cursor-pointer transition select-none ${
+                      transactionType === 'BUY'
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-950 font-bold shadow-2xs ring-1 ring-emerald-400/50'
+                        : 'border-ink-200 bg-ink-50/50 text-ink-600 hover:bg-ink-100/60'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="txOrderTypeRadio"
+                      value="BUY"
+                      checked={transactionType === 'BUY'}
+                      onChange={() => setTransactionType('BUY')}
+                      className="accent-emerald-600 cursor-pointer h-4 w-4"
+                    />
+                    <span className="flex items-center gap-1.5 text-xs font-semibold">
+                      <span>🟢</span>
+                      <span>Buy (PB)</span>
+                    </span>
+                  </label>
+
+                  <label
+                    onClick={() => setTransactionType('SELL')}
+                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border cursor-pointer transition select-none ${
+                      transactionType === 'SELL'
+                        ? 'border-amber-500 bg-amber-50 text-amber-950 font-bold shadow-2xs ring-1 ring-amber-400/50'
+                        : 'border-ink-200 bg-ink-50/50 text-ink-600 hover:bg-ink-100/60'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="txOrderTypeRadio"
+                      value="SELL"
+                      checked={transactionType === 'SELL'}
+                      onChange={() => setTransactionType('SELL')}
+                      className="accent-amber-600 cursor-pointer h-4 w-4"
+                    />
+                    <span className="flex items-center gap-1.5 text-xs font-semibold">
+                      <span>🟠</span>
+                      <span>Sell (PS)</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
               {/* 1. Asset Class */}
               <div>
                 <label className="cash-label" htmlFor="assetType">Asset Class</label>
@@ -679,7 +770,27 @@ function InvestmentsContent() {
 
               {/* 2. Asset Ticker / Code */}
               <div>
-                <label className="cash-label" htmlFor="assetCode">Asset Ticker / Code</label>
+                <div className="flex items-center justify-between">
+                  <label className="cash-label" htmlFor="assetCode">Asset Ticker / Code</label>
+                  {code.trim() && (() => {
+                    const matched = holdings.find((h) => h.code.toUpperCase() === code.trim().toUpperCase());
+                    if (matched) {
+                      return (
+                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                          Owned: {matched.units} units
+                        </span>
+                      );
+                    }
+                    if (transactionType === 'SELL') {
+                      return (
+                        <span className="text-[11px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                          Not in portfolio
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
                 <input
                   id="assetCode"
                   type="text"
@@ -709,7 +820,9 @@ function InvestmentsContent() {
               {/* 3 & 4. Units & Price */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="cash-label" htmlFor="units">Units / Qty</label>
+                  <label className="cash-label" htmlFor="units">
+                    {transactionType === 'BUY' ? 'Units / Qty to Buy' : 'Units / Qty to Sell'}
+                  </label>
                   <input
                     id="units"
                     type="number"
@@ -724,7 +837,9 @@ function InvestmentsContent() {
                   />
                 </div>
                 <div>
-                  <label className="cash-label" htmlFor="buyPrice">Buy Price (Avg)</label>
+                  <label className="cash-label" htmlFor="buyPrice">
+                    {transactionType === 'BUY' ? 'Buy Price (Avg)' : 'Sell Price (Per Unit)'}
+                  </label>
                   <input
                     id="buyPrice"
                     type="number"
@@ -740,13 +855,28 @@ function InvestmentsContent() {
                 </div>
               </div>
 
+              {Number(units) > 0 && Number(buyPrice) > 0 && (
+                <div className="p-3 bg-ink-50 rounded-xl border border-ink-150 flex justify-between items-center text-xs">
+                  <span className="text-ink-600">Total Order Value:</span>
+                  <span className="font-bold text-ink-900 text-sm">
+                    {formatCurrency(Number(units) * Number(buyPrice))}
+                  </span>
+                </div>
+              )}
+
               <div className="border-t border-ink-100 pt-4 flex gap-3">
                 <button
                   type="submit"
                   disabled={saving}
-                  className="cash-button-primary flex-1 py-2.5 text-xs font-semibold"
+                  className={`cash-button-primary flex-1 py-2.5 text-xs font-semibold text-white ${
+                    transactionType === 'SELL' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-700 hover:bg-emerald-800'
+                  }`}
                 >
-                  {saving ? 'Resolving & Saving...' : 'Save Investment'}
+                  {saving
+                    ? 'Executing...'
+                    : transactionType === 'BUY'
+                    ? 'Execute Buy Order (PB...)'
+                    : 'Execute Sell Order (PS...)'}
                 </button>
                 <button
                   type="button"

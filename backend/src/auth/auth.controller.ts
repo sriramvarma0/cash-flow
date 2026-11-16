@@ -14,14 +14,50 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @Post('verify-email')
+  verifyEmail(@Body() body: { tempToken?: string; email?: string; code?: string; token?: string }) {
+    return this.authService.verifyEmail(body);
+  }
+
+  @Post('resend-verification')
+  resendVerification(@Body() body: { tempToken?: string; email?: string }) {
+    return this.authService.resendVerification(body);
+  }
+
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
   @Post('2fa/login')
-  verify2faLogin(@Body() body: { tempToken: string; code: string }) {
-    return this.authService.verify2faLogin(body.tempToken, body.code);
+  verify2faLogin(@Body() body: { tempToken: string; code: string; method?: string }) {
+    return this.authService.verify2faLogin(body.tempToken, body.code, body.method);
+  }
+
+  @Post('2fa/email/send-login-otp')
+  sendLoginEmailOtp(@Body() body: { tempToken: string }) {
+    return this.authService.sendLoginEmailOtp(body.tempToken);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('2fa/email/setup')
+  setupEmail2fa(@CurrentUser() user: { sub: string }) {
+    return this.authService.setupEmail2fa(user.sub);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('2fa/email/enable')
+  enableEmail2fa(@CurrentUser() user: { sub: string }, @Body() body: { code: string }) {
+    return this.authService.enableEmail2fa(user.sub, body.code);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('2fa/email/disable')
+  disableEmail2fa(
+    @CurrentUser() user: { sub: string },
+    @Body() body: { password?: string; code?: string }
+  ) {
+    return this.authService.disableEmail2fa(user.sub, body.password, body.code);
   }
 
   @UseGuards(JwtAuthGuard)

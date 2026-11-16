@@ -13,7 +13,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "npm run db:backup && prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test": "ts-node scripts/test-bulk-import-and-expenses.ts"
+    "test": "ts-node scripts/test-bulk-import-and-expenses.ts",
+    "test:email": "ts-node scripts/test-email-system.ts",
+    "test:2fa": "ts-node scripts/test-dual-2fa-email-otp.ts",
+    "test:signup-verify": "ts-node scripts/test-account-creation-email-verification.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.2",

@@ -1,3 +1,5 @@
+import { validateEmailConfig } from '../email/config/email.config';
+
 type EnvConfig = {
   PORT?: string;
   FRONTEND_URL?: string;
@@ -11,6 +13,15 @@ type EnvConfig = {
   JWT_EXPIRES_IN?: string;
   BCRYPT_ROUNDS?: string;
   NODE_ENV?: string;
+  // Email Provider Configuration
+  EMAIL_PROVIDER?: string;
+  GMAIL_USER?: string;
+  GMAIL_CLIENT_ID?: string;
+  GMAIL_CLIENT_SECRET?: string;
+  GMAIL_REFRESH_TOKEN?: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
+  EMAIL_REQUEST_TIMEOUT_MS?: string;
 };
 
 export function validateEnv(config: EnvConfig) {
@@ -42,6 +53,11 @@ export function validateEnv(config: EnvConfig) {
     throw new Error(
       `Invalid DATABASE_PROVIDER: "${config.DATABASE_PROVIDER}". Allowed values are "sqlite" or "d1".`
     );
+  }
+
+  // Validate email provider configuration if EMAIL_PROVIDER is specified
+  if (config.EMAIL_PROVIDER && config.EMAIL_PROVIDER.trim()) {
+    validateEmailConfig(config as Record<string, string | undefined>);
   }
 
   return {

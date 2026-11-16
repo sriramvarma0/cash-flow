@@ -27,7 +27,10 @@
     "d1:migrate:datetime:dry": "node scripts/d1-migrate-datetime.js --dry-run",
     "d1:migrate:datetime:rollback": "node scripts/d1-migrate-datetime.js --rollback",
     "test:datetime": "node scripts/test-datetime-conversion.js",
-    "test": "npm run test --workspace backend"
+    "test": "npm run test --workspace backend",
+    "test:email": "npm run test:email --workspace backend",
+    "test:2fa": "npm run test:2fa --workspace backend",
+    "test:signup-verify": "npm run test:signup-verify --workspace backend"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",

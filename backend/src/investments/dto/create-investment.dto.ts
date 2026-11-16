@@ -1,4 +1,4 @@
-import { IsNumber, IsString, Min, IsOptional } from 'class-validator';
+import { IsNumber, IsString, Min, IsOptional, IsIn } from 'class-validator';
 
 export class CreateInvestmentDto {
   @IsString()
@@ -18,4 +18,9 @@ export class CreateInvestmentDto {
   @IsOptional()
   @IsString()
   date?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['BUY', 'SELL'])
+  transactionType?: 'BUY' | 'SELL';
 }

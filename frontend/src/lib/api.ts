@@ -11,13 +11,16 @@ async function parseJson<T>(response: Response): Promise<T> {
   const urlPath = response.url ? new URL(response.url).pathname : 'API';
 
   if (!response.ok) {
+    // Only redirect to login when the core session check fails (e.g. /api/users/me returns 401).
+    // NEVER wipe cashflow_accounts from localStorage so multiple accounts remain preserved,
+    // and NEVER redirect on modal/action errors (like password verification failures).
+    const isSessionExpired = response.status === 401 && urlPath === '/api/users/me';
     if (
-      response.status === 401 &&
+      isSessionExpired &&
       typeof window !== 'undefined' &&
       window.location.pathname !== '/login' &&
       window.location.pathname !== '/register'
     ) {
-      localStorage.removeItem('cashflow_accounts');
       void fetch('/api/auth/logout', { method: 'POST' }).finally(() => {
         window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
       });
@@ -67,7 +70,22 @@ export interface LoginResponse {
   user?: AuthUser;
   accessToken?: string;
   requires2FA?: boolean;
+  requiresVerification?: boolean;
   tempToken?: string;
+  defaultMethod?: 'totp' | 'email';
+  availableMethods?: ('totp' | 'email')[];
+  email?: string;
+  maskedEmail?: string;
+  message?: string;
+}
+
+export interface RegisterResponse {
+  user?: AuthUser;
+  accessToken?: string;
+  requiresVerification?: boolean;
+  tempToken?: string;
+  email?: string;
+  maskedEmail?: string;
   message?: string;
 }
 
@@ -82,6 +100,10 @@ export interface TwoFactorSetupData {
 
 export interface TwoFactorStatus {
   enabled: boolean;
+  totpEnabled?: boolean;
+  emailOtpEnabled?: boolean;
+  email?: string;
+  maskedEmail?: string;
   remainingRecoveryCodes: number;
 }
 
@@ -95,14 +117,49 @@ export async function login(payload: Omit<AuthPayload, 'name' | 'phoneNumber'>) 
   );
 }
 
-export async function verify2faLogin(tempToken: string, code: string) {
+export async function verify2faLogin(tempToken: string, code: string, method?: string) {
   return parseJson<{ user: AuthUser; accessToken: string; recoveryCodeUsed?: boolean; remainingRecoveryCodes?: number; message?: string }>(
     await fetch('/api/auth/2fa/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tempToken, code })
+      body: JSON.stringify({ tempToken, code, method })
     })
   );
+}
+
+export async function sendLoginEmailOtp(tempToken: string) {
+  const response = await fetch('/api/auth/2fa/email/send-login-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tempToken })
+  });
+  return parseJson<{ success: boolean; message: string; email: string }>(response);
+}
+
+export async function setupEmail2fa() {
+  const response = await fetch('/api/auth/2fa/email/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  return parseJson<{ success: boolean; message: string; email: string }>(response);
+}
+
+export async function enableEmail2fa(code: string) {
+  const response = await fetch('/api/auth/2fa/email/enable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+  return parseJson<{ success: boolean; message: string }>(response);
+}
+
+export async function disableEmail2fa(payload: { password?: string; code?: string }) {
+  const response = await fetch('/api/auth/2fa/email/disable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return parseJson<{ success: boolean; message: string }>(response);
 }
 
 export async function setup2fa() {
@@ -152,8 +209,28 @@ export async function changePassword(payload: { currentPassword: string; newPass
 }
 
 export async function register(payload: AuthPayload) {
-  return parseJson<{ user: AuthUser; accessToken: string }>(
+  return parseJson<RegisterResponse>(
     await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export async function verifyEmail(payload: { tempToken?: string; email?: string; code?: string; token?: string }) {
+  return parseJson<{ user: AuthUser; accessToken: string; message: string }>(
+    await fetch('/api/auth/verify-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export async function resendVerification(payload: { tempToken?: string; email?: string }) {
+  return parseJson<{ success: boolean; tempToken?: string; email?: string; maskedEmail?: string; message: string; alreadyVerified?: boolean }>(
+    await fetch('/api/auth/resend-verification', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -459,6 +536,7 @@ export async function createInvestment(payload: {
   units: number;
   buyPrice: number;
   date?: string;
+  transactionType?: 'BUY' | 'SELL';
 }) {
   const response = await fetch('/api/investments', {
     method: 'POST',

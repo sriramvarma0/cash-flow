@@ -2,10 +2,11 @@ import { Injectable, OnModuleInit, NotFoundException, BadRequestException, Unaut
 import { User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import { generateNumericUuidV7, deriveDeterministicTrackingId } from '../common/utils/uuid7.util';
+import { generateNumericUuidV7, deriveDeterministicTrackingId, generateAssetTrackingId } from '../common/utils/uuid7.util';
 
 export type SafeUser = Pick<User, 'id' | 'name' | 'email' | 'phoneNumber' | 'createdAt'> & {
   twoFactorEnabled?: boolean;
+  isEmailVerified?: boolean;
 };
 
 @Injectable()
@@ -72,7 +73,16 @@ export class UsersService implements OnModuleInit {
     return this.prisma.user.findUnique({ where: { id } });
   }
 
-  async createUser(data: { name: string; email: string; phoneNumber: string; passwordHash: string }) {
+  async createUser(data: {
+    name: string;
+    email: string;
+    phoneNumber: string;
+    passwordHash: string;
+    isEmailVerified?: boolean;
+    emailVerifyCode?: string | null;
+    emailVerifyExpiresAt?: Date | null;
+    emailVerifyToken?: string | null;
+  }) {
     let id = generateNumericUuidV7(10);
     let existing = await this.findById(id);
     while (existing) {
@@ -90,6 +100,7 @@ export class UsersService implements OnModuleInit {
         name: true,
         email: true,
         phoneNumber: true,
+        isEmailVerified: true,
         createdAt: true
       }
     });
@@ -102,6 +113,7 @@ export class UsersService implements OnModuleInit {
         name: true,
         email: true,
         phoneNumber: true,
+        isEmailVerified: true,
         createdAt: true
       }
     });
@@ -114,7 +126,8 @@ export class UsersService implements OnModuleInit {
       email: user.email,
       phoneNumber: user.phoneNumber,
       createdAt: user.createdAt,
-      twoFactorEnabled: Boolean(user.twoFactorEnabled)
+      twoFactorEnabled: Boolean(user.twoFactorEnabled),
+      isEmailVerified: Boolean(user.isEmailVerified)
     };
   }
 
@@ -124,7 +137,7 @@ export class UsersService implements OnModuleInit {
 
     const matches = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!matches) {
-      throw new UnauthorizedException('Current password does not match.');
+      throw new BadRequestException('Current password does not match.');
     }
 
     if (!newPassword || newPassword.length < 8) {
@@ -267,6 +280,7 @@ export class UsersService implements OnModuleInit {
         })),
         investments: investments.map((inv) => ({
           id: inv.id,
+          assetId: inv.assetId,
           code: inv.code,
           name: inv.name,
           type: inv.type,
@@ -364,52 +378,74 @@ export class UsersService implements OnModuleInit {
     if (Array.isArray(data.investments)) {
       stats.investments.total = data.investments.length;
       for (const inv of data.investments) {
-        if (!inv.id) continue;
+        if (!inv.id && !inv.code) continue;
 
-        let targetInvId = inv.id;
-        const existingInvWithOriginalId = await this.prisma.investment.findUnique({
-          where: { id: inv.id }
-        });
+        const assetCode = (inv.code || 'UNKNOWN').trim().toUpperCase();
 
-        // If the ID belongs to another user in DB, or this is a different user importing:
-        // derive a deterministic tracking ID unique to this user!
-        if (
-          (existingInvWithOriginalId && existingInvWithOriginalId.userId !== userId) ||
-          (!isSelfRestore && (!existingInvWithOriginalId || existingInvWithOriginalId.userId !== userId))
-        ) {
-          targetInvId = deriveDeterministicTrackingId(inv.id, 'ASSET', userId);
+        // 1. Ensure global application-wide Asset exists for this ticker
+        let globalAsset = await this.prisma.asset.findUnique({ where: { code: assetCode } });
+        if (!globalAsset) {
+          let globalAssetId = inv.assetId || (inv.id && /^A[0-9A-Z]{9}$/.test(inv.id) ? inv.id : generateAssetTrackingId());
+          while (await this.prisma.asset.findUnique({ where: { id: globalAssetId } })) {
+            globalAssetId = generateAssetTrackingId();
+          }
+          globalAsset = await this.prisma.asset.create({
+            data: {
+              id: globalAssetId,
+              code: assetCode,
+              name: inv.name || 'Unnamed Asset',
+              type: inv.type || 'Stock',
+              currentPrice: Number(inv.currentPrice ?? inv.buyPrice ?? 0)
+            }
+          });
         }
 
-        assetIdMap.set(inv.id, targetInvId);
+        const targetAssetId = globalAsset.id;
 
-        const existingInv = await this.prisma.investment.findUnique({
-          where: { id: targetInvId }
+        // 2. Check if user already has this holding entry
+        const existingInv = await this.prisma.investment.findFirst({
+          where: {
+            userId,
+            OR: [
+              { code: assetCode },
+              { assetId: targetAssetId },
+              { id: inv.id }
+            ]
+          }
         });
 
         if (existingInv) {
-          if (existingInv.userId === userId) {
-            await this.prisma.investment.update({
-              where: { id: targetInvId },
-              data: {
-                code: inv.code ?? existingInv.code,
-                name: inv.name ?? existingInv.name,
-                type: inv.type ?? existingInv.type,
-                units: inv.units !== undefined ? Number(inv.units) : existingInv.units,
-                buyPrice: inv.buyPrice !== undefined ? Number(inv.buyPrice) : existingInv.buyPrice,
-                currentPrice: inv.currentPrice !== undefined ? Number(inv.currentPrice) : existingInv.currentPrice,
-                color: inv.color ?? existingInv.color,
-                date: inv.date ? new Date(inv.date) : existingInv.date
-              }
-            }).catch(() => {});
-            stats.investments.updated++;
-          } else {
-            stats.investments.skipped++;
-          }
+          assetIdMap.set(inv.id, existingInv.id);
+          await this.prisma.investment.update({
+            where: { id: existingInv.id },
+            data: {
+              assetId: targetAssetId,
+              code: assetCode,
+              name: inv.name ?? existingInv.name,
+              type: inv.type ?? existingInv.type,
+              units: inv.units !== undefined ? Number(inv.units) : existingInv.units,
+              buyPrice: inv.buyPrice !== undefined ? Number(inv.buyPrice) : existingInv.buyPrice,
+              currentPrice: inv.currentPrice !== undefined ? Number(inv.currentPrice) : existingInv.currentPrice,
+              color: inv.color ?? existingInv.color,
+              date: inv.date ? new Date(inv.date) : existingInv.date
+            }
+          }).catch(() => {});
+          stats.investments.updated++;
         } else {
+          let targetInvId = inv.id;
+          if (
+            !isSelfRestore ||
+            (await this.prisma.investment.findUnique({ where: { id: targetInvId } }))
+          ) {
+            targetInvId = deriveDeterministicTrackingId(inv.id || assetCode, 'ASSET', userId);
+          }
+          assetIdMap.set(inv.id, targetInvId);
+
           await this.prisma.investment.create({
             data: {
               id: targetInvId,
-              code: inv.code || 'UNKNOWN',
+              assetId: targetAssetId,
+              code: assetCode,
               name: inv.name || 'Unnamed Asset',
               type: inv.type || 'Stock',
               units: Number(inv.units || 0),

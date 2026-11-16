@@ -138,7 +138,9 @@ async function runTestSuite() {
       user: [{
         id: 'u1', name: 'Sriram Varma', email: 'test@example.com', phoneNumber: '1234567890',
         passwordHash: '$2b$10$hash', twoFactorEnabled: 0, twoFactorSecret: null, twoFactorTempSecret: null,
-        twoFactorRecoveryCodes: null, failedLoginAttempts: 0, lockoutUntil: null, createdAt: 1783245388569
+        twoFactorRecoveryCodes: null, emailOtpEnabled: 0, emailOtpCode: null, emailOtpExpiresAt: null,
+        isEmailVerified: 1, emailVerifyCode: null, emailVerifyExpiresAt: null, emailVerifyToken: null,
+        failedLoginAttempts: 0, lockoutUntil: null, createdAt: 1783245388569
       }]
     });
 
@@ -156,7 +158,9 @@ async function runTestSuite() {
       user: [{
         'User.id': 'u1', 'User.name': 'Sriram Varma', 'User.email': 'test@example.com', 'User.phoneNumber': '1234567890',
         'User.passwordHash': '$2b$10$hash', 'User.twoFactorEnabled': 0, 'User.twoFactorSecret': null, 'User.twoFactorTempSecret': null,
-        'User.twoFactorRecoveryCodes': null, 'User.failedLoginAttempts': 0, 'User.lockoutUntil': null, 'User.createdAt': 1783245388569
+        'User.twoFactorRecoveryCodes': null, 'User.emailOtpEnabled': 0, 'User.emailOtpCode': null, 'User.emailOtpExpiresAt': null,
+        'User.isEmailVerified': 1, 'User.emailVerifyCode': null, 'User.emailVerifyExpiresAt': null, 'User.emailVerifyToken': null,
+        'User.failedLoginAttempts': 0, 'User.lockoutUntil': null, 'User.createdAt': 1783245388569
       }]
     });
 
@@ -174,7 +178,9 @@ async function runTestSuite() {
       user: [{
         'main.User.id': 'u1', 'main.User.name': 'Sriram Varma', 'main.User.email': 'test@example.com', 'main.User.phoneNumber': '1234567890',
         'main.User.passwordHash': '$2b$10$hash', 'main.User.twoFactorEnabled': 0, 'main.User.twoFactorSecret': null, 'main.User.twoFactorTempSecret': null,
-        'main.User.twoFactorRecoveryCodes': null, 'main.User.failedLoginAttempts': 0, 'main.User.lockoutUntil': null, 'main.User.createdAt': 1783245388569
+        'main.User.twoFactorRecoveryCodes': null, 'main.User.emailOtpEnabled': 0, 'main.User.emailOtpCode': null, 'main.User.emailOtpExpiresAt': null,
+        'main.User.isEmailVerified': 1, 'main.User.emailVerifyCode': null, 'main.User.emailVerifyExpiresAt': null, 'main.User.emailVerifyToken': null,
+        'main.User.failedLoginAttempts': 0, 'main.User.lockoutUntil': null, 'main.User.createdAt': 1783245388569
       }]
     });
 
@@ -191,7 +197,9 @@ async function runTestSuite() {
       user: [{
         '`User`.`id`': 'u1', '`User`.`name`': 'Sriram Varma', '`User`.`email`': 'test@example.com', '`User`.`phoneNumber`': '1234567890',
         '`User`.`passwordHash`': '$2b$10$hash', '`User`.`twoFactorEnabled`': 0, '`User`.`twoFactorSecret`': null, '`User`.`twoFactorTempSecret`': null,
-        '`User`.`twoFactorRecoveryCodes`': null, '`User`.`failedLoginAttempts`': 0, '`User`.`lockoutUntil`': null, '`User`.`createdAt`': 1783245388569
+        '`User`.`twoFactorRecoveryCodes`': null, '`User`.`emailOtpEnabled`': 0, '`User`.`emailOtpCode`': null, '`User`.`emailOtpExpiresAt`': null,
+        '`User`.`isEmailVerified`': 1, '`User`.`emailVerifyCode`': null, '`User`.`emailVerifyExpiresAt`': null, '`User`.`emailVerifyToken`': null,
+        '`User`.`failedLoginAttempts`': 0, '`User`.`lockoutUntil`': null, '`User`.`createdAt`': 1783245388569
       }]
     });
 
@@ -209,7 +217,9 @@ async function runTestSuite() {
       user: [{
         id: 'u1', name: 'Sriram Varma', email: 'test@example.com', phoneNumber: '1234567890',
         passwordHash: '$2b$10$hash', twoFactorEnabled: 0, twoFactorSecret: null, twoFactorTempSecret: null,
-        twoFactorRecoveryCodes: null, failedLoginAttempts: 0, lockoutUntil: null, createdAt: '2026-07-05T09:56:28.569Z'
+        twoFactorRecoveryCodes: null, emailOtpEnabled: 0, emailOtpCode: null, emailOtpExpiresAt: null,
+        isEmailVerified: 1, emailVerifyCode: null, emailVerifyExpiresAt: null, emailVerifyToken: null,
+        failedLoginAttempts: 0, lockoutUntil: null, createdAt: '2026-07-05T09:56:28.569Z'
       }]
     });
 
@@ -227,12 +237,16 @@ async function runTestSuite() {
         {
           id: 'u_null', name: 'Null Lockout', email: 'null@test.com', phoneNumber: '101',
           passwordHash: 'h', twoFactorEnabled: 0, twoFactorSecret: null, twoFactorTempSecret: null,
-          twoFactorRecoveryCodes: null, failedLoginAttempts: 0, lockoutUntil: null, createdAt: 1783245388569
+          twoFactorRecoveryCodes: null, emailOtpEnabled: 0, emailOtpCode: null, emailOtpExpiresAt: null,
+          isEmailVerified: 1, emailVerifyCode: null, emailVerifyExpiresAt: null, emailVerifyToken: null,
+          failedLoginAttempts: 0, lockoutUntil: null, createdAt: 1783245388569
         },
         {
           id: 'u_locked', name: 'Locked User', email: 'locked@test.com', phoneNumber: '102',
           passwordHash: 'h', twoFactorEnabled: 0, twoFactorSecret: null, twoFactorTempSecret: null,
-          twoFactorRecoveryCodes: null, failedLoginAttempts: 5, lockoutUntil: 1783246388569, createdAt: 1783245388569
+          twoFactorRecoveryCodes: null, emailOtpEnabled: 0, emailOtpCode: null, emailOtpExpiresAt: null,
+          isEmailVerified: 1, emailVerifyCode: null, emailVerifyExpiresAt: null, emailVerifyToken: null,
+          failedLoginAttempts: 5, lockoutUntil: 1783246388569, createdAt: 1783245388569
         }
       ]
     });
@@ -265,7 +279,7 @@ async function runTestSuite() {
         status: 'PENDING', createdAt: 1784802955361
       }],
       investment: [{
-        id: 'asset_1', code: 'AAPL', name: 'Apple Inc', type: 'Stock', units: 15.0,
+        id: 'asset_1', assetId: 'AAPL', code: 'AAPL', name: 'Apple Inc', type: 'Stock', units: 15.0,
         buyPrice: 150.0, currentPrice: 185.0, color: '#000', date: 1786619580000,
         userId: 'u1', createdAt: 1786619726981, updatedAt: 1792522296092
       }],

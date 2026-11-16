@@ -18,6 +18,13 @@ model User {
   twoFactorSecret        String?
   twoFactorTempSecret    String?
   twoFactorRecoveryCodes String?
+  emailOtpEnabled        Boolean                 @default(false)
+  emailOtpCode           String?
+  emailOtpExpiresAt      DateTime?
+  isEmailVerified        Boolean                 @default(true)
+  emailVerifyCode        String?
+  emailVerifyExpiresAt   DateTime?
+  emailVerifyToken       String?
   failedLoginAttempts    Int                     @default(0)
   lockoutUntil           DateTime?
   createdAt              DateTime                @default(now())
@@ -91,8 +98,21 @@ model Tag {
   @@unique([name, userId])
 }
 
+model Asset {
+  id           String       @id // Global Asset Tracking ID: 'A' + 9 alphanumeric characters (e.g. A7J3L0RI7A)
+  code         String       @unique // Symbol or ticker code uppercase, e.g. AAPL, BTC-USD, RELIANCE.NS
+  name         String
+  type         String       // Stock, Mutual Fund, ETF, Crypto, Gold, Real Estate
+  currentPrice Float        @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  investments  Investment[]
+}
+
 model Investment {
   id           String                  @id @default(cuid())
+  assetId      String                  @default("")
+  asset        Asset?                  @relation(fields: [assetId], references: [id], onDelete: Cascade)
   code         String                  @default("") // Symbol or ticker code, e.g. AAPL, BTC-USD, RELIANCE.NS
   name         String
   type         String                  // Stock, Mutual Fund, ETF, Crypto, Gold, Real Estate
@@ -107,7 +127,9 @@ model Investment {
   createdAt    DateTime                @default(now())
   updatedAt    DateTime                @updatedAt
 
+  @@unique([userId, code])
   @@index([userId])
+  @@index([assetId])
 }
 
 model InvestmentTransaction {
@@ -126,5 +148,3 @@ model InvestmentTransaction {
   @@index([investmentId])
   @@index([userId])
 }
-
-

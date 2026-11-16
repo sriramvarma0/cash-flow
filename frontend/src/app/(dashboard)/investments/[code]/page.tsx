@@ -76,7 +76,7 @@ function AssetDetailsContent() {
           fetchExpenses().catch(() => []),
           fetchInvestmentTransactions(code).catch(() => [])
         ]);
-        const found = invData.find((h: Investment) => h.code.toUpperCase() === code);
+        const found = invData.find((h: Investment) => h.code.toUpperCase() === code || (h.assetId && h.assetId.toUpperCase() === code) || (h.id && h.id.toUpperCase() === code));
         if (found) {
           setHolding(found);
           setExpenses(expData);
@@ -352,18 +352,19 @@ function AssetDetailsContent() {
                 <span className="text-xs uppercase tracking-wider font-semibold text-brand-700 bg-brand-50 border border-brand-200 px-2.5 py-0.5 rounded-full">
                   {holding.type}
                 </span>
-                {holding.id && (
+                {(holding.assetId || holding.id) && (
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(holding.id);
-                      alert(`Asset Tracking ID "${holding.id}" copied to clipboard!`);
+                      const aid = holding.assetId || holding.id;
+                      navigator.clipboard.writeText(aid);
+                      alert(`Asset Tracking ID "${aid}" copied to clipboard!`);
                     }}
                     title="Click to copy Asset Tracking ID (A + 9 chars)"
                     className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 transition font-mono text-xs font-bold shadow-2xs"
                   >
                     <span className="text-[10px] text-purple-600 font-extrabold">🏷️ Asset ID:</span>
-                    <span>{holding.id}</span>
+                    <span>{holding.assetId || holding.id}</span>
                     <span className="text-[10px] text-purple-400 opacity-70">📋</span>
                   </button>
                 )}
@@ -412,12 +413,13 @@ function AssetDetailsContent() {
                     <div className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-ink-400 border-b border-ink-100 mb-1">
                       Manage Holding ({holding.code})
                     </div>
-                    {holding.id && (
+                    {(holding.assetId || holding.id) && (
                       <button
                         type="button"
                         onClick={() => {
-                          navigator.clipboard.writeText(holding.id!);
-                          alert(`Asset Tracking ID "${holding.id}" copied to clipboard!`);
+                          const aid = holding.assetId || holding.id!;
+                          navigator.clipboard.writeText(aid);
+                          alert(`Asset Tracking ID "${aid}" copied to clipboard!`);
                           setIsManageMenuOpen(false);
                         }}
                         className="w-full text-left px-3.5 py-2 text-xs font-medium text-ink-700 hover:bg-ink-50 flex items-center gap-2.5 transition"
@@ -425,7 +427,7 @@ function AssetDetailsContent() {
                         <span className="text-sm">🏷️</span>
                         <div>
                           <div>Copy Tracking ID</div>
-                          <div className="text-[10px] text-ink-400 font-mono">{holding.id}</div>
+                          <div className="text-[10px] text-ink-400 font-mono">{holding.assetId || holding.id}</div>
                         </div>
                       </button>
                     )}

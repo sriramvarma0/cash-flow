@@ -6,7 +6,10 @@ import { type FormEvent, useEffect, useState } from 'react';
 import {
   login,
   verify2faLogin,
+  sendLoginEmailOtp,
   register,
+  verifyEmail,
+  resendVerification,
   saveAccount,
   getSavedAccounts,
   removeSavedAccount,
@@ -36,10 +39,95 @@ const copy = {
   }
 } as const;
 
+const COUNTRY_CODES = [
+  { code: '+91', name: 'India', flag: '🇮🇳', sample: '98765 43210' },
+  { code: '+1', name: 'US / Canada', flag: '🇺🇸', sample: '202 555 0123' },
+  { code: '+44', name: 'UK', flag: '🇬🇧', sample: '7911 123456' },
+  { code: '+61', name: 'Australia', flag: '🇦🇺', sample: '412 345 678' },
+  { code: '+971', name: 'UAE', flag: '🇦🇪', sample: '50 123 4567' },
+  { code: '+65', name: 'Singapore', flag: '🇸🇬', sample: '8123 4567' },
+  { code: '+49', name: 'Germany', flag: '🇩🇪', sample: '151 12345678' },
+  { code: '+33', name: 'France', flag: '🇫🇷', sample: '6 12 34 56 78' },
+  { code: '+81', name: 'Japan', flag: '🇯🇵', sample: '90 1234 5678' },
+  { code: '+86', name: 'China', flag: '🇨🇳', sample: '138 0013 8000' },
+  { code: '+55', name: 'Brazil', flag: '🇧🇷', sample: '11 91234 5678' },
+  { code: '+52', name: 'Mexico', flag: '🇲🇽', sample: '55 1234 5678' },
+  { code: '+34', name: 'Spain', flag: '🇪🇸', sample: '612 34 56 78' },
+  { code: '+39', name: 'Italy', flag: '🇮🇹', sample: '312 345 6789' },
+  { code: '+31', name: 'Netherlands', flag: '🇳🇱', sample: '6 12345678' },
+  { code: '+41', name: 'Switzerland', flag: '🇨🇭', sample: '78 123 45 67' },
+  { code: '+46', name: 'Sweden', flag: '🇸🇪', sample: '70 123 45 67' },
+  { code: '+47', name: 'Norway', flag: '🇳🇴', sample: '412 34 567' },
+  { code: '+45', name: 'Denmark', flag: '🇩🇰', sample: '20 12 34 56' },
+  { code: '+353', name: 'Ireland', flag: '🇮🇪', sample: '83 123 4567' },
+  { code: '+64', name: 'New Zealand', flag: '🇳🇿', sample: '21 123 4567' },
+  { code: '+27', name: 'South Africa', flag: '🇿🇦', sample: '71 123 4567' },
+  { code: '+234', name: 'Nigeria', flag: '🇳🇬', sample: '802 123 4567' },
+  { code: '+254', name: 'Kenya', flag: '🇰🇪', sample: '712 345678' },
+  { code: '+20', name: 'Egypt', flag: '🇪🇬', sample: '10 1234 5678' },
+  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦', sample: '50 123 4567' },
+  { code: '+974', name: 'Qatar', flag: '🇶🇦', sample: '3312 3456' },
+  { code: '+965', name: 'Kuwait', flag: '🇰🇼', sample: '9123 4567' },
+  { code: '+82', name: 'South Korea', flag: '🇰🇷', sample: '10 1234 5678' },
+  { code: '+852', name: 'Hong Kong', flag: '🇭🇰', sample: '9123 4567' },
+  { code: '+60', name: 'Malaysia', flag: '🇲🇾', sample: '12 345 6789' },
+  { code: '+62', name: 'Indonesia', flag: '🇮🇩', sample: '812 3456 7890' },
+  { code: '+63', name: 'Philippines', flag: '🇵🇭', sample: '917 123 4567' },
+  { code: '+84', name: 'Vietnam', flag: '🇻🇳', sample: '91 234 5678' },
+  { code: '+66', name: 'Thailand', flag: '🇹🇭', sample: '81 234 5678' },
+  { code: '+92', name: 'Pakistan', flag: '🇵🇰', sample: '300 1234567' },
+  { code: '+880', name: 'Bangladesh', flag: '🇧🇩', sample: '1712 345678' },
+  { code: '+94', name: 'Sri Lanka', flag: '🇱🇰', sample: '71 234 5678' },
+  { code: '+977', name: 'Nepal', flag: '🇳🇵', sample: '984 1234567' }
+];
+
+function getDefaultCountryCode(): string {
+  if (typeof window === 'undefined') return '+91';
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    if (tz.includes('Calcutta') || tz.includes('Kolkata')) return '+91';
+    if (tz.includes('London')) return '+44';
+    if (tz.includes('Australia') || tz.includes('Sydney') || tz.includes('Melbourne') || tz.includes('Brisbane')) return '+61';
+    if (tz.includes('Dubai')) return '+971';
+    if (tz.includes('Singapore')) return '+65';
+    if (tz.includes('Berlin') || tz.includes('Frankfurt')) return '+49';
+    if (tz.includes('Paris')) return '+33';
+    if (tz.includes('New_York') || tz.includes('Chicago') || tz.includes('Los_Angeles') || tz.includes('Denver') || tz.includes('Toronto')) return '+1';
+  } catch {}
+  return '+91';
+}
+
+function getSamplePlaceholder(dialCode: string): string {
+  const match = COUNTRY_CODES.find((c) => c.code === dialCode);
+  return match ? match.sample : '98765 43210';
+}
+
+function buildFullPhoneNumber(selectedCountryCode: string, inputNumber: string): string {
+  const trimmed = (inputNumber || '').trim();
+  // If user explicitly typed a leading '+', e.g. '+919876543210' or '+12025550123'
+  if (trimmed.startsWith('+')) {
+    return trimmed.replace(/[\s()-]/g, '');
+  }
+
+  // Strip all non-digit characters
+  const cleanDigits = trimmed.replace(/\D/g, '');
+  const dialDigits = selectedCountryCode.replace('+', '');
+
+  // If user typed the country dial code without '+' (e.g. '919876543210' with +91 selected)
+  if (cleanDigits.startsWith(dialDigits) && cleanDigits.length >= dialDigits.length + 7) {
+    return `+${cleanDigits}`;
+  }
+
+  // Strip domestic trunk prefix (leading zeros like 07123... or 09876...)
+  const localWithoutLeadingZero = cleanDigits.replace(/^0+/, '');
+  return `${selectedCountryCode}${localWithoutLeadingZero}`;
+}
+
 export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextPath: string }) {
   const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [countryCode, setCountryCode] = useState('+91');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
 
@@ -48,12 +136,43 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
   const [twoFactorPendingToken, setTwoFactorPendingToken] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [useBackupCode, setUseBackupCode] = useState(false);
+  const [twoFactorAvailableMethods, setTwoFactorAvailableMethods] = useState<('totp' | 'email')[]>([]);
+  const [twoFactorActiveMethod, setTwoFactorActiveMethod] = useState<'totp' | 'email'>('totp');
+  const [twoFactorMaskedEmail, setTwoFactorMaskedEmail] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendMessage, setResendMessage] = useState('');
+
+  // Email Verification state
+  const [emailVerifyRequired, setEmailVerifyRequired] = useState(false);
+  const [emailVerifyPendingToken, setEmailVerifyPendingToken] = useState('');
+  const [emailVerifyTargetEmail, setEmailVerifyTargetEmail] = useState('');
+  const [emailVerifyMaskedEmail, setEmailVerifyMaskedEmail] = useState('');
+  const [emailVerifyCode, setEmailVerifyCode] = useState('');
+  const [emailVerifyCooldown, setEmailVerifyCooldown] = useState(0);
+  const [emailVerifyMessage, setEmailVerifyMessage] = useState('');
 
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [isAddAccount, setIsAddAccount] = useState(false);
+
+  useEffect(() => {
+    setCountryCode(getDefaultCountryCode());
+  }, []);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
+
+  useEffect(() => {
+    if (emailVerifyCooldown <= 0) return;
+    const timer = setTimeout(() => setEmailVerifyCooldown(emailVerifyCooldown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [emailVerifyCooldown]);
 
   useEffect(() => {
     setSavedAccounts(getSavedAccounts());
@@ -61,6 +180,7 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
       const params = new URLSearchParams(window.location.search);
       if (params.get('addAccount') === 'true') {
         setShowForm(true);
+        setIsAddAccount(true);
       }
     }
   }, []);
@@ -68,33 +188,32 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    setIsSubmitting(true);
 
-    try {
-      const result = await register({ name, email, phoneNumber, password });
-      if (result && result.user && result.accessToken) {
-        saveAccount(result.user, result.accessToken);
-      }
-      router.replace(nextPath as never);
-      router.refresh();
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : 'Unable to complete registration');
-    } finally {
-      setIsSubmitting(false);
+    const rawNumber = phoneNumber.trim();
+    if (!rawNumber) {
+      setError('Please enter your phone number.');
+      return;
     }
-  }
 
-  // Login handler with 2FA interception
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError('');
+    const fullPhoneNumber = buildFullPhoneNumber(countryCode, rawNumber);
+    const digitsOnly = fullPhoneNumber.replace(/\D/g, '');
+
+    if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+      setError('Please enter a valid phone number (between 7 and 15 digits).');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      const result = await login({ email, password });
-      if (result.requires2FA && result.tempToken) {
-        setTwoFactorPendingToken(result.tempToken);
-        setTwoFactorRequired(true);
+      const result = await register({ name, email, phoneNumber: fullPhoneNumber, password });
+      if (result.requiresVerification) {
+        setEmailVerifyPendingToken(result.tempToken || '');
+        setEmailVerifyTargetEmail(result.email || email);
+        setEmailVerifyMaskedEmail(result.maskedEmail || '');
+        setEmailVerifyRequired(true);
+        setEmailVerifyCooldown(30);
+        setEmailVerifyMessage(result.message || 'Verification code sent to your email.');
         setError('');
         setIsSubmitting(false);
         return;
@@ -102,13 +221,118 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
 
       if (result && result.user && result.accessToken) {
         saveAccount(result.user, result.accessToken);
+        window.location.href = nextPath || '/dashboard';
+        return;
       }
-      router.replace(nextPath as never);
-      router.refresh();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Unable to complete registration');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // Login handler with 2FA and Email Verification interception
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setIsSubmitting(true);
+
+    try {
+      const result = await login({ email, password });
+      if (result.requiresVerification) {
+        setEmailVerifyPendingToken(result.tempToken || '');
+        setEmailVerifyTargetEmail(result.email || email);
+        setEmailVerifyMaskedEmail(result.maskedEmail || '');
+        setEmailVerifyRequired(true);
+        setEmailVerifyCooldown(30);
+        setEmailVerifyMessage(result.message || 'Please verify your email address before signing in.');
+        setError('');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (result.requires2FA && result.tempToken) {
+        setTwoFactorPendingToken(result.tempToken);
+        setTwoFactorRequired(true);
+        const rawMethods = (result.availableMethods || []) as ('totp' | 'email')[];
+        const methods: ('totp' | 'email')[] = rawMethods.length > 0 ? rawMethods : ['totp'];
+        setTwoFactorAvailableMethods(methods);
+        setTwoFactorActiveMethod(result.defaultMethod || (methods.includes('totp') ? 'totp' : 'email'));
+        setTwoFactorMaskedEmail(result.email || '');
+        setTwoFactorCode('');
+        setResendCooldown(result.defaultMethod === 'email' ? 30 : 0);
+        setResendMessage(result.defaultMethod === 'email' ? 'Verification code sent to your email.' : '');
+        setError('');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (result && result.user && result.accessToken) {
+        saveAccount(result.user, result.accessToken);
+        window.location.href = nextPath || '/dashboard';
+        return;
+      }
+      window.location.href = nextPath || '/dashboard';
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Unable to sign in');
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleVerifyEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!emailVerifyCode.trim()) {
+      setError('Please enter the 6-digit verification code.');
+      return;
+    }
+
+    setError('');
+    setIsSubmitting(true);
+    try {
+      const result = await verifyEmail({
+        tempToken: emailVerifyPendingToken,
+        email: emailVerifyTargetEmail,
+        code: emailVerifyCode.trim()
+      });
+      if (result && result.user && result.accessToken) {
+        saveAccount(result.user, result.accessToken);
+        window.location.href = nextPath || '/dashboard';
+        return;
+      }
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Invalid verification code. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleResendVerificationCode() {
+    if (emailVerifyCooldown > 0) return;
+    setError('');
+    setEmailVerifyMessage('');
+    try {
+      const res = await resendVerification({
+        tempToken: emailVerifyPendingToken,
+        email: emailVerifyTargetEmail
+      });
+      setEmailVerifyMessage(res.message || 'New verification code sent to your email.');
+      setEmailVerifyCooldown(30);
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Failed to resend verification code');
+    }
+  }
+
+  async function handleResendEmailOtp() {
+    if (resendCooldown > 0 || !twoFactorPendingToken) return;
+    setError('');
+    setResendMessage('');
+    try {
+      const res = await sendLoginEmailOtp(twoFactorPendingToken);
+      setResendMessage(res.message || 'Verification code resent!');
+      setResendCooldown(30);
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Failed to resend code');
     }
   }
 
@@ -120,11 +344,15 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
     setError('');
     setIsSubmitting(true);
     try {
-      const result = await verify2faLogin(twoFactorPendingToken, twoFactorCode.trim());
+      const result = await verify2faLogin(
+        twoFactorPendingToken,
+        twoFactorCode.trim(),
+        useBackupCode ? 'backup' : twoFactorActiveMethod
+      );
       if (result.user && result.accessToken) {
         saveAccount(result.user, result.accessToken);
-        router.replace(nextPath as never);
-        router.refresh();
+        window.location.href = nextPath || '/dashboard';
+        return;
       }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Invalid 2FA code. Please try again.');
@@ -138,11 +366,9 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
     setIsSubmitting(true);
     try {
       await switchAccount(acc.accessToken);
-      router.replace(nextPath as never);
-      router.refresh();
+      window.location.href = nextPath || '/dashboard';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to switch account');
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -231,7 +457,7 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
 
       <div className="mt-8 pt-4 border-t border-ink-100 text-sm text-ink-500">
         New to CashFlow?{' '}
-        <Link className="font-semibold text-brand-700 hover:text-brand-800" href={`/register?next=${encodeURIComponent(nextPath)}`}>
+        <Link className="font-semibold text-brand-700 hover:text-brand-800" href={`/register?next=${encodeURIComponent(nextPath)}${isAddAccount ? '&addAccount=true' : ''}`}>
           Create account
         </Link>
       </div>
@@ -276,20 +502,82 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
                   <span>Two-Factor Authentication</span>
                 </div>
                 <h2 className="text-3xl font-semibold text-ink-900">
-                  {useBackupCode ? 'Enter Backup Code' : 'Two-Factor Challenge'}
+                  {useBackupCode
+                    ? 'Enter Backup Code'
+                    : twoFactorActiveMethod === 'email'
+                    ? 'Email Verification Code'
+                    : 'Authenticator App Challenge'}
                 </h2>
                 <p className="text-sm text-ink-500">
                   {useBackupCode
                     ? 'Enter one of your emergency recovery codes (format: XXXXX-XXXXX).'
-                    : 'Open your Authenticator app (Google Authenticator, Microsoft Authenticator, Authy, etc.) and enter the 6-digit code.'}
+                    : twoFactorActiveMethod === 'email'
+                    ? `Enter the 6-digit one-time password (OTP) sent to ${twoFactorMaskedEmail || 'your email'}.`
+                    : 'Open your Authenticator app (Google Authenticator, Microsoft Authenticator, Authy, etc.) and enter the live 6-digit code.'}
                 </p>
               </div>
 
+              {/* Method Switcher Tabs if both methods available and not in backup code mode */}
+              {twoFactorAvailableMethods.length > 1 && !useBackupCode && (
+                <div className="grid grid-cols-2 gap-2 p-1 bg-ink-100 rounded-xl mb-6 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTwoFactorActiveMethod('totp');
+                      setTwoFactorCode('');
+                      setError('');
+                      setResendMessage('');
+                    }}
+                    className={`py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition ${
+                      twoFactorActiveMethod === 'totp'
+                        ? 'bg-white text-ink-900 shadow-xxs'
+                        : 'text-ink-500 hover:text-ink-900'
+                    }`}
+                  >
+                    <span>📱 Authenticator App</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setTwoFactorActiveMethod('email');
+                      setTwoFactorCode('');
+                      setError('');
+                      if (resendCooldown === 0) {
+                        await handleResendEmailOtp();
+                      }
+                    }}
+                    className={`py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition ${
+                      twoFactorActiveMethod === 'email'
+                        ? 'bg-white text-ink-900 shadow-xxs'
+                        : 'text-ink-500 hover:text-ink-900'
+                    }`}
+                  >
+                    <span>✉️ Email OTP</span>
+                  </button>
+                </div>
+              )}
+
               <form className="space-y-4" onSubmit={handleVerify2fa}>
                 <div>
-                  <label className="cash-label" htmlFor="twoFactorCode">
-                    {useBackupCode ? 'Recovery Code' : '6-Digit Verification Code'}
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="cash-label" htmlFor="twoFactorCode">
+                      {useBackupCode
+                        ? 'Recovery Code'
+                        : twoFactorActiveMethod === 'email'
+                        ? '6-Digit Email Code'
+                        : '6-Digit Authenticator Code'}
+                    </label>
+                    {twoFactorActiveMethod === 'email' && !useBackupCode && (
+                      <button
+                        type="button"
+                        onClick={handleResendEmailOtp}
+                        disabled={resendCooldown > 0}
+                        className="text-xs font-semibold text-brand-700 hover:text-brand-800 disabled:text-ink-400 disabled:cursor-not-allowed transition"
+                      >
+                        {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
+                      </button>
+                    )}
+                  </div>
                   <input
                     id="twoFactorCode"
                     type="text"
@@ -302,6 +590,12 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
                     required
                   />
                 </div>
+
+                {resendMessage && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-medium text-emerald-800">
+                    {resendMessage}
+                  </div>
+                )}
 
                 {error ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -320,10 +614,13 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
                       setUseBackupCode(!useBackupCode);
                       setTwoFactorCode('');
                       setError('');
+                      setResendMessage('');
                     }}
                     className="text-xs font-semibold text-brand-700 hover:text-brand-800 transition"
                   >
-                    {useBackupCode ? '← Use 6-digit Authenticator code' : 'Use emergency recovery code'}
+                    {useBackupCode
+                      ? `← Use 6-digit ${twoFactorActiveMethod === 'email' ? 'Email OTP' : 'Authenticator code'}`
+                      : 'Use emergency recovery code'}
                   </button>
 
                   <button
@@ -333,11 +630,99 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
                       setTwoFactorPendingToken('');
                       setTwoFactorCode('');
                       setError('');
+                      setResendMessage('');
                     }}
                     className="text-xs font-medium text-ink-500 hover:text-ink-800 transition"
                   >
                     Cancel
                   </button>
+                </div>
+              </form>
+            </div>
+          ) : emailVerifyRequired ? (
+            <div className="cash-card p-6 sm:p-8 bg-white shadow-card">
+              <div className="mb-6 space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold border border-blue-200">
+                  <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                  </svg>
+                  <span>Email Verification</span>
+                </div>
+                <h2 className="text-3xl font-semibold text-ink-900">Verify your email</h2>
+                <p className="text-sm text-ink-500">
+                  We&apos;ve sent a 6-digit verification code to{' '}
+                  <strong className="text-ink-900">
+                    {emailVerifyMaskedEmail || emailVerifyTargetEmail || 'your email'}
+                  </strong>
+                  . Please enter it below to activate your account.
+                </p>
+              </div>
+
+              <form className="space-y-4" onSubmit={handleVerifyEmail}>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="cash-label" htmlFor="emailVerifyCode">
+                      6-Digit Verification Code
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleResendVerificationCode}
+                      disabled={emailVerifyCooldown > 0}
+                      className="text-xs font-semibold text-brand-700 hover:text-brand-800 disabled:text-ink-400 disabled:cursor-not-allowed transition"
+                    >
+                      {emailVerifyCooldown > 0 ? `Resend code in ${emailVerifyCooldown}s` : 'Resend code'}
+                    </button>
+                  </div>
+                  <input
+                    id="emailVerifyCode"
+                    type="text"
+                    className="cash-input text-center text-2xl tracking-widest font-mono font-bold"
+                    value={emailVerifyCode}
+                    onChange={(event) => setEmailVerifyCode(event.target.value.trim().toUpperCase())}
+                    placeholder="000000"
+                    maxLength={6}
+                    autoFocus
+                    required
+                  />
+                </div>
+
+                {emailVerifyMessage && (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-medium text-blue-800">
+                    {emailVerifyMessage}
+                  </div>
+                )}
+
+                {error ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {error}
+                  </div>
+                ) : null}
+
+                <button type="submit" className="cash-button-primary w-full" disabled={isSubmitting}>
+                  {isSubmitting ? 'Verifying...' : 'Verify & Activate Account'}
+                </button>
+
+                <div className="flex items-center justify-between pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmailVerifyRequired(false);
+                      setEmailVerifyPendingToken('');
+                      setEmailVerifyCode('');
+                      setError('');
+                      setEmailVerifyMessage('');
+                    }}
+                    className="text-xs font-semibold text-brand-700 hover:text-brand-800 transition"
+                  >
+                    ← Back to {mode === 'login' ? 'sign in' : 'edit details'}
+                  </button>
+
+                  <span className="text-xs text-ink-400">Code valid for 24 hours</span>
                 </div>
               </form>
             </div>
@@ -438,15 +823,43 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
                     <label className="cash-label" htmlFor="phoneNumber">
                       Phone number
                     </label>
-                    <input
-                      id="phoneNumber"
-                      type="tel"
-                      className="cash-input"
-                      value={phoneNumber}
-                      onChange={(event) => setPhoneNumber(event.target.value)}
-                      placeholder="+1 555 123 4567"
-                      required
-                    />
+                    <div className="flex gap-2">
+                      <div className="relative w-36 sm:w-44 shrink-0">
+                        <select
+                          id="countryCode"
+                          className="cash-input appearance-none bg-white pr-8 text-xs font-medium cursor-pointer"
+                          value={countryCode}
+                          onChange={(event) => setCountryCode(event.target.value)}
+                          aria-label="Country Code"
+                        >
+                          {COUNTRY_CODES.map((item) => (
+                            <option key={`${item.code}-${item.name}`} value={item.code}>
+                              {item.flag} {item.code} ({item.name})
+                            </option>
+                          ))}
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-ink-400">
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <input
+                          id="phoneNumber"
+                          type="tel"
+                          inputMode="numeric"
+                          className="cash-input text-sm"
+                          value={phoneNumber}
+                          onChange={(event) => setPhoneNumber(event.target.value)}
+                          placeholder={getSamplePlaceholder(countryCode)}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <p className="mt-1.5 text-xxs text-ink-400">
+                      Country code is selected on the left. Enter your phone number on the right (e.g. {getSamplePlaceholder(countryCode)}).
+                    </p>
                   </div>
 
                   <div>
@@ -480,7 +893,7 @@ export function AuthPage({ mode, nextPath }: { mode: 'login' | 'register'; nextP
               <div className="mt-6 flex flex-col gap-2.5">
                 <div className="text-sm text-ink-500">
                   {activeCopy.footer}{' '}
-                  <Link className="font-semibold text-brand-700 hover:text-brand-800" href={`${activeCopy.footerLink}?next=${encodeURIComponent(nextPath)}`}>
+                  <Link className="font-semibold text-brand-700 hover:text-brand-800" href={`${activeCopy.footerLink}?next=${encodeURIComponent(nextPath)}${isAddAccount ? '&addAccount=true' : ''}`}>
                     {activeCopy.footerLinkLabel}
                   </Link>
                 </div>

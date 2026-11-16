@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { AppController } from './app.controller';
 import { GroupsModule } from './groups/groups.module';
 import { InvestmentsModule } from './investments/investments.module';
+import { EmailModule } from './email/email.module';
 
 @Module({
   imports: [
@@ -20,7 +21,8 @@ import { InvestmentsModule } from './investments/investments.module';
     AuthModule,
     ExpensesModule,
     GroupsModule,
-    InvestmentsModule
+    InvestmentsModule,
+    EmailModule
   ],
   controllers: [AppController]
 })

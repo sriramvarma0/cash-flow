@@ -72,7 +72,9 @@ const DATETIME_COLUMN_NAMES = new Set([
   'date',
   'startedat',
   'finishedat',
-  'rolledbackat'
+  'rolledbackat',
+  'emailotpexpiresat',
+  'emailverifyexpiresat'
 ]);
 
 function cleanColumnName(colName: string): string {
